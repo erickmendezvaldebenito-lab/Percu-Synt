@@ -174,6 +174,13 @@ Cada firmware es un sketch Arduino independiente (`.ino`). Se compila y se carga
 - Un solo panel: 5 botones y 4 pots, una función cada uno, sin combos ni páginas escondidas. Play sortea el modo, BTN2 sortea el tema
 - Imprime modo/tema/tonalidad por Serial en cada botón, para que puedas identificar un sonido que te gustó
 
+#### `atmosfera_deep` — Ambiente deep que muta y se llena de capas
+- **El POT3 hace crecer la escala y la orquesta a la vez**: con el pot abajo sólo existen la tónica y la quinta (un dron pelado); al subirlo entran, de a una, la tercera, la séptima, la cuarta, la segunda y la sexta, y con cada nota una capa nueva: dron → pad → textura → pulso de dub → arpegio → hats → bombo.
+- **POT2 = mutación**: abajo un acorde quieto; arriba el acorde cambia cada 8, 4, 2 o 1 compases (sólo raíces con tríada consonante), el pad abre y cierra su brillo y el arpegio se reescribe. Todo llega al borde del compás y desliza.
+- BTN1 play · BTN2 filtro (POT4 = corte) · BTN3 sinte que sigue al POT2 (sonar / campana FM / coro) · BTN4 delay ping-pong en el tempo · BTN5 **pausas sincronizadas** (respira / corte / dub). Un solo reloj; cada nota es un grado del modo, así que ninguna sale de tono.
+- Cada Play sortea tonalidad, modo (eólico, dórico o frigio) y tempo; **la escena y los modos se guardan en la flash del chip** y el primer Play tras encender repite la guardada.
+- **No medido en la placa**: la carga de CPU se estimó contra `dub_capas`, `bruma_capas` y `kraftwerk_capas` (~35 % el dron solo, ~80 % el peor caso), con un regulador de carga y `-DDIAG=1` para medirla. Falta oírlo.
+
 #### `impact_chimes` — Campanas por golpe en el piso
 - Instrumento por **impacto**: se apoya el equipo en el piso y el **acelerómetro detecta los golpes** → dispara notas de una escala tipo campanas (eólica por defecto)
 - Una escala distinta por cada botón; los potenciómetros controlan la síntesis
@@ -414,6 +421,7 @@ percusynth/
 │   ├── oscilador_escalas/          #   4 pots = 4 osciladores por escala (port sin Mozzi)
 │   ├── oscilador_escalas_clock/    #   oscilador_escalas + MIDI Clock por el DIN-5 + LEDs al ritmo de la intermitencia
 │   ├── espacio_modular/            #   Ambientes de película: 24 temas sobre dron continuo
+│   ├── atmosfera_deep/             #   Ambiente deep que muta: el POT3 hace crecer la escala y las capas (dron → pad → textura → pulso → arpegio → hats → bombo)
 │   ├── techno_capas/               #   Techno ácido en 3 capas (BAJO/RITMO/SONIDOS), cada una con su reloj; base de la familia siguiente
 │   ├── bruma_capas/                #   Downtempo / trip-hop (84 BPM, swing, sub + acordes de piano eléctrico), mismas reglas de capas
 │   ├── dub_capas/                  #   Dub / roots sound system (72 BPM, one drop, skank, eco infinito), mismas reglas de capas
