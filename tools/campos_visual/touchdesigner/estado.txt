@@ -1,0 +1,3 @@
+rafagas=71 fuente=spec frame=4861 fps=60.0 device=default audio_in.numChans=1 spec.numChans=1 canales=1
+pos_a: numChans=4 numSamples=65536
+pos_a: singleset=True crop=full opciones_crop=['pixel', 'row', 'col', 'block', 'full'] sim=256x256 render=720x1280

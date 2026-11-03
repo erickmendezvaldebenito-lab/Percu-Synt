@@ -1,0 +1,9 @@
+[audio] driver=coreaudio  dispositivos: ['default', 'MacBook Pro (micrófono): MacBook Pro (micrófono)', 'Micrófono de iPhone de Erick']
+[audio] driver=native  dispositivos: ['default', 'MacBook Pro (micrófono): MacBook Pro (micrófono)', 'Micrófono de iPhone de Erick']
+[audio] driver=CoreAudio  dispositivos: ['default', 'MacBook Pro (micrófono): MacBook Pro (micrófono)', 'Micrófono de iPhone de Erick']
+[audio] driver=default  dispositivos: ['default', 'MacBook Pro (micrófono): MacBook Pro (micrófono)', 'Micrófono de iPhone de Erick']
+============================================================
+Red creada en /project1/humo — mira el nodo "salida".
+Hay 1 parámetros que no pude poner (probablemente nombres distintos en tu versión). Cópiame esto:
+[FALLÓ] audio_in: no veo un dispositivo con "DJM" (ver lista [audio] arriba); driver menú: (['default', 'asio', 'datapath', 'blackmagic', 'aja', 'deltacast'], ['default (DirectSound/CoreAudio)', 'ASIO', 'DataPath (RGBEASY)', 'Blackmagic', 'AJA', 'Deltacast'])
+Si algo se ve vacío: abre el Textport y copia cualquier error rojo.

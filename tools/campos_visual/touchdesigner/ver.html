@@ -1,0 +1,11 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Humo — vista en vivo</title>
+<style>html,body{margin:0;height:100%;background:#fff;display:flex;align-items:center;justify-content:center}img{height:100vh;max-width:100vw;object-fit:contain}
+#t{position:fixed;left:8px;top:6px;font:12px/1.3 system-ui;color:#888}</style></head><body>
+<img id="i" alt="esperando a TouchDesigner…"><div id="t"></div>
+<script>
+// Recarga salida_vivo.png (que TouchDesigner reescribe ~10 veces por segundo) sin parpadeo: precarga y cambia.
+const img=document.getElementById('i'), t=document.getElementById('t'); let n=0, ult=performance.now();
+function paso(){ const p=new Image(); p.onload=()=>{ img.src=p.src; n++; const now=performance.now(); if(now-ult>1000){ t.textContent=(n*1000/(now-ult)).toFixed(1)+' imágenes/s'; n=0; ult=now; } setTimeout(paso,60); };
+  p.onerror=()=>{ t.textContent='sin imagen todavía: ejecuta lanzador.py en TouchDesigner'; setTimeout(paso,500); }; p.src='salida_vivo.png?'+Date.now(); }
+paso();
+</script></body></html>

@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>¿Cómo funciona un tostador?</title>
+<style>
+:root{--paper:#f5f0e5;--navy:#1f2a5a;--shadow:#ddd4c3;--mint:#8fd3b6;--coral:#f07a6a;--yL:#ffe58a;--yM:#f5c518;--yD:#d4960c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--navy);font:15px/1.45 "Trebuchet MS","Segoe UI",system-ui,sans-serif}
+.app{display:grid;grid-template-columns:290px minmax(0,1fr);gap:18px;max-width:1280px;margin:0 auto;padding:16px}
+h1{margin:0 0 4px;font:700 26px/1.1 "Chalkboard SE","Bradley Hand","Segoe Print",cursive}
+.sub{margin:0 0 12px;font-size:13px;opacity:.75}
+.side{display:flex;flex-direction:column;gap:10px}
+.mode{display:grid;grid-template-columns:1fr 1fr;border:2px solid var(--navy);border-radius:999px;overflow:hidden;background:#fffaf0}
+.mode button{border:0;background:transparent;padding:9px 6px;font:700 13px inherit;font-family:inherit;color:var(--navy);cursor:pointer;letter-spacing:.04em}
+.mode button[aria-pressed=true]{background:var(--navy);color:#fff}
+.steps{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.step{width:100%;display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:20px;border:2px solid var(--navy);background:#fffaf0;color:var(--navy);font:600 15px/1.2 inherit;font-family:inherit;text-align:left;cursor:pointer;box-shadow:0 3px 0 var(--shadow)}
+.step .n{flex:none;width:32px;height:32px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-weight:700}
+.step:disabled{cursor:default;box-shadow:none;opacity:.55}
+.step.done{opacity:.4}.step.done .n{background:var(--mint);color:var(--navy)}
+.step.next{background:#ffe27a;opacity:1;animation:pulse 1.4s ease-in-out infinite}
+.step.run{background:#ffd0c8;opacity:1}
+@keyframes pulse{50%{box-shadow:0 3px 0 var(--shadow),0 0 0 5px #ffe27a88}}
+.reset{border:2px dashed var(--navy);background:transparent;border-radius:16px;padding:9px;font:700 14px inherit;font-family:inherit;color:var(--navy);cursor:pointer}
+.main{min-width:0;display:flex;flex-direction:column;gap:10px}
+.tags{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{border:2px solid var(--navy);border-radius:999px;padding:3px 12px;font:700 12px inherit;font-family:inherit;letter-spacing:.08em;background:#fffaf0}
+.tag.edu{background:var(--mint)}
+.badge{background:var(--coral);color:#fff;border-color:var(--navy);transition:opacity .2s}
+.badge[hidden]{display:inline-block;opacity:0}
+.bubble{position:relative;border:2px solid var(--navy);border-radius:22px;background:#fffaf0;padding:10px 16px;min-height:62px;font:600 17px/1.35 "Chalkboard SE","Bradley Hand","Segoe Print",cursive;box-shadow:0 3px 0 var(--shadow)}
+.stage{border:2px solid var(--navy);border-radius:22px;background:var(--paper);overflow:hidden;box-shadow:0 3px 0 var(--shadow)}
+svg{display:block;width:100%;height:auto}
+.f{stroke:var(--navy);stroke-width:1.2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.m-yel .f-t{fill:var(--yL)}.m-yel .f-y{fill:var(--yM)}.m-yel .f-x{fill:var(--yD)}
+.m-met .f-t{fill:#f1f3f5}.m-met .f-y{fill:#cdd3d9}.m-met .f-x{fill:#9aa4af}
+.m-dark .f-t{fill:#6d7689}.m-dark .f-y{fill:#505a6d}.m-dark .f-x{fill:#363e50}
+.m-mint .f-t{fill:#c4efdc}.m-mint .f-y{fill:#8fd3b6}.m-mint .f-x{fill:#62ad90}
+.m-coral .f-t{fill:#ffc2b6}.m-coral .f-y{fill:#f07a6a}.m-coral .f-x{fill:#c4533f}
+.m-white .f-t{fill:#fffdf7}.m-white .f-y{fill:#efe9da}.m-white .f-x{fill:#d4cbb4}
+.ln{fill:none;stroke:var(--navy);stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.hand{font-family:"Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS",cursive;fill:var(--navy)}
+.sfx{font-weight:700;paint-order:stroke;stroke:#fffaf0;stroke-width:4px;stroke-linejoin:round}
+.lab{font-size:13px;opacity:.9}
+.ind{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.card{border:2px solid var(--navy);border-radius:16px;background:#fffaf0;padding:6px 8px;box-shadow:0 3px 0 var(--shadow);min-width:0}
+.card small{display:block;font:700 10.5px inherit;font-family:inherit;letter-spacing:.07em;opacity:.7}
+.card b{display:block;font:700 18px/1.2 ui-monospace,Menlo,Consolas,monospace;white-space:nowrap}
+.lvl{display:flex;align-items:center;gap:4px}
+.lvl button{border:2px solid var(--navy);background:var(--mint);width:24px;height:24px;border-radius:50%;font:700 14px/1 inherit;font-family:inherit;color:var(--navy);cursor:pointer;padding:0}
+.lvl button:disabled{opacity:.3;cursor:default}
+.bottom{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:12px}
+.idea{border:2px solid var(--navy);border-radius:20px;background:#fff6c9;padding:12px 16px}
+.idea h2{margin:0 0 6px;font:700 17px/1.3 "Chalkboard SE","Bradley Hand","Segoe Print",cursive}
+.idea p{margin:0 0 4px;font-size:14px}
+.sw{border:2px solid var(--navy);border-radius:20px;background:#fffaf0;padding:12px 14px}
+.sw h3{margin:0 0 8px;font-size:13px;letter-spacing:.06em}
+.sw div{display:flex;gap:8px}
+.sw button{width:34px;height:34px;border-radius:50%;border:2px solid var(--navy);cursor:pointer;padding:0}
+.sw button[aria-pressed=true]{box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--navy)}
+@media (max-width:980px){.app{grid-template-columns:1fr}.steps{display:grid;grid-template-columns:1fr 1fr}.ind{grid-template-columns:repeat(4,1fr)}.bottom{grid-template-columns:1fr}}
+@media (max-width:560px){.steps{grid-template-columns:1fr}.ind{grid-template-columns:repeat(2,1fr)}}
+</style></head>
+<body><div class="app">
+<aside class="side">
+  <div><h1>El tostador por dentro</h1><p class="sub">¿Por qué tarda unos 2 minutos en dorar el pan?</p></div>
+  <div class="mode" role="group" aria-label="Modo"><button id="mMan" aria-pressed="true">MANUAL</button><button id="mAut" aria-pressed="false">AUTOMÁTICO</button></div>
+  <ol class="steps" id="steps"></ol>
+  <button class="reset" id="reset">↺ Volver a empezar</button>
+</aside>
+<section class="main">
+  <div class="tags"><span class="tag edu">SIMULACIÓN EDUCATIVA</span><span class="tag badge" id="badge" hidden>×1</span></div>
+  <div class="bubble" id="bubble">Pulsa el paso 1 para empezar.</div>
+  <div class="stage"><svg id="svg" viewBox="0 0 840 580" role="img" aria-label="Tostador eléctrico amarillo de dos ranuras en vista isométrica con un corte que muestra resistencias, rebanadas, mecanismo de elevación y bandeja de migas">
+    <defs><pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#1f2a5a" stroke-opacity=".28" stroke-width="1"/></pattern></defs>
+    <ellipse cx="400" cy="400" rx="330" ry="120" fill="#ddd4c3" opacity=".55"/>
+    <g id="scene"></g><g id="over"></g>
+  </svg></div>
+  <div class="ind" id="ind"></div>
+  <div class="bottom">
+    <div class="idea"><h2>La idea clave: el pan necesita perder humedad antes de que su superficie pueda calentarse lo suficiente para dorarse</h2>
+      <p>Las resistencias son hilos metálicos que se calientan al pasar la electricidad y mandan calor al pan, como un mini sol. Primero ese calor se gasta en convertir el agua del pan en vapor, así que la superficie se queda cerca de los 100 °C. Cuando se seca, ya puede subir de unos 140 °C y el pan se dora.</p>
+      <p style="opacity:.7;font-size:12.5px">Valores orientativos: cada tostador real es distinto.</p></div>
+    <div class="sw"><h3>COLOR DE LA CARCASA</h3><div id="sw"></div></div>
+  </div>
+</section></div>
+<script>
+/*MODEL-START*/
+const MODEL = { P_W: 850, T_AMB: 20, T_EL: 600, W0: 3, TAU_ON: 7, TAU_OFF: 28,
+  A: 0.016, KC: 0.006, TAU_IN: 25, E0: 0.045, LAM: 100, WC: 0.5, KB: 3.5, KL: 0.03, LATCH: 7 };
+const cycleSeconds = (shade) => 60 + 15 * shade;
+const smoothstep = (a, b, x) => { const u = Math.min(1, Math.max(0, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
+function schedule(shade) {
+  const T = cycleSeconds(shade), L = MODEL.LATCH, mid = L + Math.round(0.62 * T);
+  return [[0, 3], [3, 5], [5, 7], [L, L + 20], [L + 20, mid], [mid, L + T], [L + T, L + T + 2.5], [L + T + 2.5, L + T + 6]];
+}
+// Función pura: recibe tiempo simulado (s desde el paso 1), nivel 1-6 y condiciones iniciales.
+function simulateToaster(elapsed, shade, initial) {
+  const ini = Object.assign({ ambient: 20, water: 3, dialStart: 1 }, initial || {});
+  const T = cycleSeconds(shade), tOn = MODEL.LATCH, tOff = tOn + T, dt = 0.1;
+  let Tr = ini.ambient, Ts = ini.ambient, Tin = ini.ambient, W = ini.water, B = 0, Wh = 0, evap = 0, t = 0;
+  while (t < elapsed - 1e-9) {
+    const h = Math.min(dt, elapsed - t), on = t >= tOn && t < tOff;
+    Tr += ((on ? MODEL.T_EL : ini.ambient) - Tr) / (on ? MODEL.TAU_ON : MODEL.TAU_OFF) * h;
+    const wet = W / ini.water;
+    evap = MODEL.E0 * Math.min(1, wet / MODEL.WC) * smoothstep(40, 98, Ts);
+    const flux = MODEL.A * Math.max(0, Tr - Ts) - 0.002 * Math.max(0, Ts - Tr);
+    Ts += (flux - MODEL.LAM * evap - MODEL.KC * (Ts - Tin) - MODEL.KL * (Ts - ini.ambient) - (t >= tOff ? 0.06 : 0) * (Ts - ini.ambient)) * h;
+    Ts = Math.min(Math.max(Ts, ini.ambient), Math.max(Tr, ini.ambient));
+    Tin += (Ts - Tin) / MODEL.TAU_IN * h * (Ts > Tin ? 1 : 0.2);
+    W = Math.max(0, W - evap * h);
+    const dry = smoothstep(0.35, 0.7, 1 - W / ini.water);
+    B += MODEL.KB * smoothstep(120, 185, Ts) * dry * (1 - B / 100) * h;
+    if (on) Wh += MODEL.P_W * h / 3600;
+    t += h;
+  }
+  const sch = schedule(shade), c = elapsed - tOn;
+  const ease = (u) => { u = Math.min(1, Math.max(0, u)); return u * u * (3 - 2 * u); };
+  const ins = ease(elapsed / 3), turn = ease((elapsed - 3) / 2), lever = ease((elapsed - 5) / 2);
+  const rel = Math.max(0, elapsed - tOff), spring = rel > 0 ? Math.exp(-5 * rel) * Math.cos(9 * rel) : 1;
+  
+  const down = rel > 0 ? Math.max(-0.25, Math.min(1, spring)) : lever;
+  const out = ease((elapsed - (tOff + 2.5)) / 3.5);
+  const latched = elapsed >= tOn - 0.02 && elapsed < tOff;
+  const crust = Math.min(100, B);
+  return { t: elapsed, shade, T, cycle: Math.min(Math.max(c, 0), T), heating: on0(elapsed, tOn, tOff),
+    Tr, Ts, W, B: crust, Wh, kWh: Wh / 1000, power: on0(elapsed, tOn, tOff) ? MODEL.P_W : 0, evap,
+    insert: ins, dial: ini.dialStart + (shade - ini.dialStart) * turn, lever, down, latched, hook: elapsed < tOff ? ease((elapsed - 6.2) / 0.8) : 1 - ease((elapsed - tOff) / 0.25),
+    carriage: 44 - 30 * down, removed: out, sliceDone: elapsed >= tOff + 2.5,
+    final: crust < 8 ? 'pan casi sin tostar' : crust < 35 ? 'tostada clara' : crust < 70 ? 'tostada dorada' : 'tostada oscura', schedule: sch };
+}
+function on0(e, a, b) { return e >= a && e < b; }
+/*MODEL-END*/
+
+// ───────────── Proyección isométrica (cámara fija) ─────────────
+const K = 2, OX = 430, OY = 262;
+const P = (x, y, z) => [OX + (x - y) * 0.866 * K, OY + (x + y) * 0.5 * K - z * K];
+const f1 = (n) => n.toFixed(1);
+const pts = (a) => a.map((p) => f1(p[0]) + ',' + f1(p[1])).join(' ');
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const ss = (a, b, x) => smoothstep(a, b, x);
+const mix = (a, b, u) => a + (b - a) * u;
+const hex = (c) => '#' + c.map((v) => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0')).join('');
+const lerpC = (stops, v) => { // stops: [[v,[r,g,b]],...]
+  if (v <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i++) if (v <= stops[i][0]) { const u = (v - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]); return stops[i - 1][1].map((c, k) => mix(c, stops[i][1][k], u)); }
+  return stops[stops.length - 1][1];
+};
+const ELEM = [[20, [139, 144, 153]], [160, [150, 140, 132]], [330, [255, 160, 60]], [450, [255, 110, 40]], [600, [255, 50, 30]]];
+const CRUMB = [[0, [246, 227, 180]], [30, [233, 194, 119]], [60, [201, 138, 60]], [100, [122, 68, 23]]];
+const CRUST = [[0, [217, 168, 92]], [30, [185, 121, 45]], [60, [138, 79, 29]], [100, [74, 38, 12]]];
+const shadeC = (c, k) => c.map((v) => v * k);
+
+// ───────────── Escena: cajas con orden de pintor por planos separadores ─────────────
+const items = []; // estáticos
+function box(b, m, o) { const it = Object.assign({ b, m }, o || {}); items.push(it); return it; }
+const faces = (b) => { const [x0, x1, y0, y1, z0, z1] = b; return {
+  t: [P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)],
+  y: [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)],
+  x: [P(x1, y0, z0), P(x1, y1, z0), P(x1, y1, z1), P(x1, y0, z1)] }; };
+function boxSvg(it, fills) {
+  const F = faces(it.b), cut = it.cut || '';
+  const poly = (k, cls) => `<polygon class="f f-${k}"${fills ? ` fill="${fills[k]}"` : ''} points="${pts(F[k])}"/>` + (cut.includes(k) ? `<polygon points="${pts(F[k])}" fill="url(#hatch)"/>` : '');
+  return `<g class="${it.m}">${poly('x')}${poly('y')}${poly('t')}</g>`;
+}
+const sepBehind = (a, b) => a.b[1] <= b.b[0] + 1e-6 || a.b[3] <= b.b[2] + 1e-6 || a.b[5] <= b.b[4] + 1e-6;
+function sortItems(list) {
+  const n = list.length, out = [], deps = list.map(() => []), indeg = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const ab = sepBehind(list[i], list[j]), ba = sepBehind(list[j], list[i]);
+    if (ab && !ba) { deps[i].push(j); indeg[j]++; } else if (ba && !ab) { deps[j].push(i); indeg[i]++; }
+  }
+  const depth = (it) => (it.b[0] + it.b[1] + it.b[2] + it.b[3]) / 2 + it.b[5] * 0.3;
+  const ready = []; for (let i = 0; i < n; i++) if (!indeg[i]) ready.push(i);
+  while (ready.length) {
+    let bi = 0; for (let k = 1; k < ready.length; k++) if (depth(list[ready[k]]) < depth(list[ready[bi]])) bi = k;
+    const i = ready.splice(bi, 1)[0]; out.push(list[i]);
+    for (const j of deps[i]) if (!--indeg[j]) ready.push(j);
+  }
+  return out.length === n ? out : list.slice().sort((a, b) => depth(a) - depth(b));
+}
+// geometría del tostador (unidades ≈ mm/2)
+const LX = 180, DY = 100, ZB = 8, ZD = 78, ZT = 84, SY = [25, 62], SL = [30, 142], SH = 60, UP = 44, DOWN = 14;
+box([0, 180, 0, 100, 0, 8], 'm-yel');                                       // zócalo
+for (const [x, y] of [[6, 6], [166, 6], [6, 86], [166, 86]]) box([x, x + 8, y, y + 8, -4, 0], 'm-dark');
+box([0, 180, 0, 4, 8, ZD], 'm-yel', { cut: '' });                           // pared trasera
+box([0, 4, 0, 100, 8, ZD], 'm-yel');                                        // pared izquierda
+box([176, 180, 0, 10, 8, ZD], 'm-yel', { cut: 'y' });                       // lateral derecho (resto)
+const W2 = box([176, 180, 16, 40, 8, ZD], 'm-yel', { cut: 'y', dyn: (s) => panelSvg(s) });
+box([176, 180, 10, 16, 56, ZD], 'm-yel', { cut: 'y' });
+const FR = box([0, 60, 96, 100, 8, ZD], 'm-yel', { cut: 'x', dyn: (s) => frontSvg(s) }); // frente (resto)
+for (const b of [[0, 180, 0, 20], [0, 180, 30, 40], [0, 24, 20, 30], [148, 180, 20, 30], [0, 60, 40, 57], [0, 60, 67, 100], [0, 24, 57, 67]])
+  box([b[0], b[1], b[2], b[3], ZD, ZT], 'm-yel', { cut: b[3] === 40 && b[1] === 180 ? 'y' : (b[1] === 60 ? 'x' : '') });
+// bandeja de migas + migas
+box([14, 166, 10, 92, 8, 11], 'm-met'); box([14, 166, 92, 96, 8, 20], 'm-met'); box([78, 102, 96, 104, 12, 17], 'm-mint');
+box([14, 18, 10, 92, 11, 14], 'm-met'); box([162, 166, 10, 92, 11, 14], 'm-met');
+const CR = [[40, 20], [72, 38], [100, 60], [128, 24], [58, 74], [90, 82], [140, 70], [118, 46], [152, 56], [30, 56]];
+CR.forEach(([x, y], i) => box([x, x + 2.4, y, y + 2.4, 11, 13 + (i % 3) * 0.4], 'm-coral'));
+// resistencias: 4 planos con sus soportes
+const PLANES = [15, 35, 52, 72];
+for (const y of PLANES) { box([24, 27, y - 1, y + 1, 11, 74], 'm-met'); box([145, 148, y - 1, y + 1, 11, 74], 'm-met'); box([27, 145, y - 0.6, y + 0.6, 16, 72], 'm-met', { noFaces: true, dyn: (s) => wiresSvg(s, y) }); }
+// engranajes en la pared trasera
+box([138, 162, 4, 4.6, 30, 56], 'm-met', { noFaces: true, dyn: (s) => gearSvg(s) });
+// guía + resorte + retén (zona del corte)
+box([158, 162, 46, 50, 8, 80], 'm-met');
+box([150, 170, 44, 52, 8, 10], 'm-dark');
+// cable + clavija + plato
+box([-100, -44, 55, 111, -2, 1], 'm-white');
+box([-92, -80, -26, -14, 0, 8], 'm-dark'); box([-90, -88, -14, -10, 2, 4], 'm-met'); box([-84, -82, -14, -10, 2, 4], 'm-met');
+// ───────────── Decoraciones sobre las caras ─────────────
+const circleOn = (plane, c, r, n) => Array.from({ length: n }, (_, i) => { const a = i / n * 2 * Math.PI; return plane(c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)); });
+const gaugeSvg = (plane, c, r, val, max, label) => {
+  const rim = pts(circleOn(plane, c, r, 28)), face = pts(circleOn(plane, c, r - 1.6, 28));
+  let s = `<polygon points="${rim}" fill="#fffdf7" class="ln"/><polygon points="${face}" fill="#fff6dc" stroke="#1f2a5a" stroke-opacity=".35" stroke-width="1"/>`;
+  for (let i = 0; i <= 8; i++) { const a = (-215 + i * 250 / 8) * Math.PI / 180, r0 = r - 1.8, r1 = r - (i % 2 ? 3 : 4.2); s += `<path class="ln" d="M${P2(plane, c, r0, a)}L${P2(plane, c, r1, a)}" style="stroke-opacity:.7"/>`; }
+  const a = (-215 + clamp(val / max, 0, 1) * 250) * Math.PI / 180;
+  s += `<path class="ln" d="M${P2(plane, c, -2, a)}L${P2(plane, c, r - 3, a)}" style="stroke:#f07a6a;stroke-width:2"/><circle cx="${f1(plane(c[0], c[1])[0])}" cy="${f1(plane(c[0], c[1])[1])}" r="1.6" fill="#1f2a5a"/>`;
+  return s;
+};
+const P2 = (plane, c, r, a) => { const p = plane(c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)); return f1(p[0]) + ' ' + f1(p[1]); };
+const planeY = (y) => (u, v) => P(u, y, v);   // cara +y: (x, z)
+const planeX = (x) => (u, v) => P(x, u, v);   // cara +x: (y, z)
+const txt = (m, x, y, str, size, anchor) => `<text transform="matrix(${m})" x="${x}" y="${y}" font-size="${size}" text-anchor="${anchor || 'middle'}" class="hand lab" style="font-weight:700">${str}</text>`;
+function frontSvg(s) {
+  const pl = planeY(100.1), o = pl(0, 0);
+  const m = '1.732 1 0 2 ' + f1(o[0]) + ' ' + f1(o[1]);
+  const tm = (u, v) => { const p = P(u, 100.1, v); return `1.732 1 0 2 ${f1(p[0])} ${f1(p[1])}`; };
+  return gaugeSvg(pl, [16, 55], 11, s.Tr, 700) + gaugeSvg(pl, [44, 55], 11, s.Ts, 250)
+    + `<text transform="matrix(${tm(16, 40)})" font-size="3.6" text-anchor="middle" class="hand" style="font-weight:700">RESISTENC. °C</text>`
+    + `<text transform="matrix(${tm(44, 40)})" font-size="3.6" text-anchor="middle" class="hand" style="font-weight:700">PAN °C</text>`
+    + `<rect transform="matrix(${tm(6, 32)})" width="48" height="10" rx="1.6" fill="#2d3342" stroke="#1f2a5a" stroke-width=".5"/>`
+    + `<text transform="matrix(${tm(30, 29)})" font-size="5.4" text-anchor="middle" fill="#9ff0c4" style="font:700 5.4px ui-monospace,Menlo,monospace">DORADO ${s.B.toFixed(0)}%</text>`
+    + `<text transform="matrix(${tm(30, 15)})" font-size="6" text-anchor="middle" class="hand" style="font-weight:700">TOSTI</text>`;
+}
+function panelSvg(s) { // cara +x: dial de nivel, luz indicadora y botón
+  const pl = planeX(180.1), out = [];
+  const cD = [28, 62], ring = pts(circleOn(pl, cD, 8, 28));
+  const lvlA = (L) => (-225 + (L - 1) / 5 * 270) * Math.PI / 180;
+  out.push(`<polygon points="${ring}" fill="#fffdf7" class="ln"/>`);
+  for (let L = 1; L <= 6; L++) { const a = lvlA(L); out.push(`<path class="ln" d="M${P2(pl, cD, 6.4, a)}L${P2(pl, cD, 7.6, a)}"/>`); const q = pl(cD[0] + 10.2 * Math.cos(a), cD[1] + 10.2 * Math.sin(a)); out.push(`<text x="${f1(q[0])}" y="${f1(q[1] + 3)}" font-size="9" text-anchor="middle" class="hand" style="font-weight:700">${L}</text>`); }
+  const a = lvlA(s.dial);
+  out.push(`<polygon points="${pts(circleOn(pl, cD, 5.2, 24))}" fill="#8fd3b6" class="ln"/><path class="ln" d="M${P2(pl, cD, 0, a)}L${P2(pl, cD, 6.6, a)}" style="stroke-width:2.4;stroke:#f07a6a"/>`);
+  const cL = [28, 42], lit = s.heating, ledC = lit ? '#ff5a3c' : '#7a3b36', q = pl(cL[0], cL[1]);
+  if (lit) out.push(`<circle cx="${f1(q[0])}" cy="${f1(q[1])}" r="${f1(11 + 2 * Math.sin(s.t * 6))}" fill="#ff7a4a" opacity=".35"/>`);
+  out.push(`<polygon points="${pts(circleOn(pl, cL, 3, 16))}" fill="${ledC}" class="ln"/>`);
+  const cB = [28, 26], pr = s.latched ? 1.2 : 0; const bp = (u, v) => P(180.1 + 2 - pr, u, v);
+  out.push(`<polygon points="${pts(circleOn(bp, cB, 4.6, 20))}" fill="${s.latched ? '#c4533f' : '#f07a6a'}" class="ln"/>`);
+  return out.join('');
+}
+function wiresSvg(s, y) {
+  const c = lerpC(ELEM, s.Tr), col = hex(c), g = ss(170, 460, s.Tr), n = 15, path = [];
+  for (let i = 0; i <= n; i++) { const p = P(30 + i * (112 / n), y, i % 2 ? 22 : 66); path.push((i ? 'L' : 'M') + f1(p[0]) + ' ' + f1(p[1])); }
+  const d = path.join('');
+  return `${g > 0.02 ? `<path d="${d}" fill="none" stroke="${col}" stroke-opacity="${f1(g * 0.38)}" stroke-width="${f1(7 + g * 5)}" stroke-linejoin="round" stroke-linecap="round"/>` : ''}<path d="${d}" fill="none" stroke="#1f2a5a" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${col}" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>`;
+}
+function gearOf(plane, c, r, teeth, rot, fill) {
+  const p = []; for (let i = 0; i < teeth * 4; i++) { const a = rot + i / (teeth * 4) * 2 * Math.PI, rr = (i % 4 < 2) ? r + 2.2 : r - 0.2; p.push(plane(c[0] + rr * Math.cos(a), c[1] + rr * Math.sin(a))); }
+  const hub = pts(circleOn(plane, c, r * 0.28, 12));
+  return `<polygon points="${pts(p)}" fill="${fill}" class="ln"/><polygon points="${hub}" fill="#fffdf7" class="ln"/>`;
+}
+function gearSvg(s) { const pl = planeY(4.7), a = s.down * 2.2; return gearOf(pl, [149, 43], 9, 10, a, '#cdd3d9') + gearOf(pl, [162, 37], 5, 6, -a * 9 / 5 + 0.3, '#8fd3b6'); }
+// ───────────── Elementos dinámicos ─────────────
+function breadProfile(w, h, r) {
+  const q = [[0, 0], [w, 0]]; for (let i = 0; i <= 6; i++) { const a = i / 6 * Math.PI / 2; q.push([w - r + r * Math.cos(a), h - r + r * Math.sin(a)]); }
+  for (let i = 0; i <= 6; i++) { const a = Math.PI / 2 + i / 6 * Math.PI / 2; q.push([r + r * Math.cos(a), h - r + r * Math.sin(a)]); } return q;
+}
+const PROF = breadProfile(SL[1] - SL[0], SH, 11);
+function sliceItem(s, i) {
+  const yc = SY[i], yb0 = yc - 3, yb1 = yc + 3, ins = s.insert, vis = ins > 0.001;
+  if (!vis) return null;
+  const hot = s.B, crumb = lerpC(CRUMB, hot), crust = lerpC(CRUST, hot);
+  const e = s.removed, lift = ss(0, 0.4, e), mv = ss(0.4, 1, e);
+  const bz = s.carriage + 90 * (1 - ins) + 62 * lift;
+  const o = clamp(ins / 0.3, 0, 1);
+  if (mv <= 0) {
+    const it = { b: [SL[0], SL[1], yb0, yb1, bz, bz + SH], op: o, bread: true };
+    it.draw = () => {
+      const X = SL[0], one = (y, sc) => PROF.map(([u, v]) => P(X + SL[1] / 2 - SL[0] / 2 + (u - (SL[1] - SL[0]) / 2) * sc + (SL[1] - SL[0]) / 2 - (SL[1] - SL[0]) / 2 + 0, y, bz + SH / 2 + (v - SH / 2) * sc));
+      const back = PROF.map(([u, v]) => P(X + u, yb0, bz + v)), front = PROF.map(([u, v]) => P(X + u, yb1, bz + v));
+      let g = `<g opacity="${f1(o)}">`;
+      for (let k = 0; k < PROF.length; k++) { const a = PROF[k], b = PROF[(k + 1) % PROF.length], nx = (b[1] - a[1]), nz = -(b[0] - a[0]); if (nx > 1e-6 || nz > 1e-6) g += `<polygon class="f" fill="${hex(shadeC(crust, nz > 1e-6 && nx <= 1e-6 ? 1 : 0.8))}" points="${pts([back[k], back[(k + 1) % PROF.length], front[(k + 1) % PROF.length], front[k]])}"/>`; }
+      const cx = (SL[1] - SL[0]) / 2, cz = SH / 2, inset = PROF.map(([u, v]) => P(X + cx + (u - cx) * 0.84, yb1 + 0.05, bz + cz + (v - cz) * 0.84));
+      g += `<polygon class="f" fill="${hex(crust)}" points="${pts(front)}"/><polygon fill="${hex(crumb)}" stroke="${hex(shadeC(crust, 0.8))}" stroke-width="1" points="${pts(inset)}"/>`;
+      for (let k = 0; k < 7; k++) { const p = P(X + 14 + (k * 37) % 84, yb1 + 0.1, bz + 12 + (k * 23) % 34); g += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="1.1" fill="${hex(shadeC(crumb, 0.82))}"/>`; }
+      return g + '</g>';
+    };
+    return it;
+  }
+  const tx = [-100 + 8 + (i ? 2 : 0), -44 - 8], ty = [55 + 6, 111 - 6], bz2 = 1 + i * 6 + 0.5;
+  const A = [SL[0], SL[1], yb0, yb1, bz, bz + SH], Z = [-100 + 6, -44 - 6, 55 + 6, 111 - 6, 1 + i * 6, 7 + i * 6];
+  const b = A.map((v, k) => mix(v, Z[k], mv)), top = hex(crumb), side = hex(shadeC(crust, 0.85));
+  return { b, bread: true, draw: () => { const F = faces(b); return `<polygon class="f" fill="${hex(shadeC(crust, 0.7))}" points="${pts(F.x)}"/><polygon class="f" fill="${hex(shadeC(crumb, 0.93))}" points="${pts(F.y)}"/><polygon class="f" fill="${top}" points="${pts(F.t)}"/>`; } };
+}
+function springSvg(s) {
+  const z0 = ZB + 2, z1 = s.carriage - 2, n = 12, d = []; for (let i = 0; i <= n; i++) { const p = P(166 + (i % 2 ? 3 : -3), 48, mix(z0, z1, i / n)); d.push((i ? 'L' : 'M') + f1(p[0]) + ' ' + f1(p[1])); }
+  return `<path d="${d.join('')}" fill="none" stroke="#1f2a5a" stroke-width="3.4" stroke-linejoin="round"/><path d="${d.join('')}" fill="none" stroke="#cdd3d9" stroke-width="1.6" stroke-linejoin="round"/>`;
+}
+function dynamicItems(s) {
+  const list = [], c = s.carriage;
+  for (const i of [0, 1]) { const sl = sliceItem(s, i); if (sl) list.push(sl); box_(list, [30, 142, SY[i] - 4, SY[i] + 4, c - 2, c], 'm-met'); }
+  box_(list, [150, 154, 11, 68, c - 2, c + 2], 'm-met'); box_(list, [154, 182, 11, 15, c - 1.5, c + 1.5], 'm-met');
+  box_(list, [154, 172, 45, 51, c - 2, c + 4], 'm-dark');
+  const hx = mix(176, 160, s.hook); box_(list, [hx, hx + 12, 46, 50, 8.2, 11.6], 'm-coral');
+  box_(list, [184, 197, 8, 18, c - 3, c + 3], 'm-mint'); box_(list, [182, 184, 11, 15, c - 1.5, c + 1.5], 'm-met');
+  list.push({ b: [164, 170, 45, 51, ZB, c - 2], noFaces: true, draw: () => springSvg(s) });
+  return list;
+}
+const box_ = (list, b, m) => list.push({ b, m });
+// vapor y onomatopeyas (en capa superior)
+function overlaySvg(s) {
+  let g = '';
+  const steamI = s.insert >= 1 && !s.sliceDone ? clamp(s.evap / MODEL.E0, 0, 1) * ss(80, 95, s.Ts) * (s.heating ? 1 : 0) : 0;
+  if (steamI > 0.02) for (let i = 0; i < 18; i++) {
+    const sl = i % 2, ph = (s.t * 0.45 + i / 18 + (i * 0.37) % 1) % 1, bz = s.carriage + SH;
+    const p = P(36 + ((i * 53) % 100) + ph * 10, SY[sl] + 3, bz + 2 + ph * 52);
+    g += `<circle cx="${f1(p[0] + Math.sin(ph * 9 + i) * 3)}" cy="${f1(p[1])}" r="${f1(2.4 + ph * 6)}" fill="#fff" stroke="#1f2a5a" stroke-opacity="${f1(0.4 * (1 - ph))}" opacity="${f1(steamI * (1 - ph) * 0.9)}"/>`;
+  }
+  const sfx = (str, p, a, rot, size) => a > 0.02 ? `<text class="hand sfx" x="${f1(p[0])}" y="${f1(p[1])}" font-size="${size}" opacity="${f1(a)}" transform="rotate(${rot} ${f1(p[0])} ${f1(p[1])})" text-anchor="middle">${str}</text>` : '';
+  const tO = MODEL.LATCH + s.T, c = s.t - MODEL.LATCH;
+  g += sfx('¡clac!', P(190, 36, 78), ss(6.7, 6.9, s.t) * (1 - ss(7.6, 8.8, s.t)), -10, 26);
+  g += sfx('zzzz', P(90, 100, 100), ss(0.5, 6, c) * (1 - ss(24, 34, c)) * (s.heating ? 0.75 + 0.25 * Math.sin(s.t * 7) : 0), -6, 30);
+  g += sfx('psss…', P(70, 70, 135), steamI * ss(18, 24, c) * (1 - ss(70, 84, c)), -8, 28);
+  g += sfx('¡pop!', P(85, 62, 128 + 14 * ss(0, 0.2, s.t - tO)), ss(0, 0.06, s.t - tO) * (1 - ss(0.9, 1.7, s.t - tO)), 6, 40 + 10 * (1 - ss(0, 0.4, s.t - tO)));
+  const L = (txt, a, b, t) => `<path class="ln" d="M${f1(a[0])} ${f1(a[1])}L${f1(b[0])} ${f1(b[1])}" style="stroke-opacity:.6"/><circle cx="${f1(b[0])}" cy="${f1(b[1])}" r="2" fill="#1f2a5a"/><text class="hand lab" x="${f1(a[0])}" y="${f1(a[1] - 4)}" text-anchor="${t || 'middle'}">${txt}</text>`;
+  const A = (x, y, z, dx, dy) => { const q = P(x, y, z); return [[q[0] + dx, q[1] + dy], q]; };
+  const lab = [['palanca', A(190, 13, s.carriage), 60, 24, 'start'], ['resistencia', A(100, 72, 66), -10, -62], ['resorte', A(166, 48, 28), 70, 40, 'start'], ['gancho de retención', A(166, 48, 10.5), 90, 70, 'start'], ['bandeja de migas', A(60, 96, 14), -92, 40], ['engranajes', A(150, 5, 46), -90, -50], ['rebanada de pan', A(120, 62, 98), -40, -66]];
+  for (const [t, [a, b], dx, dy, an] of lab) g += L(t, [a[0] + dx, a[1] + dy], b, an);
+  return g;
+}
+// ───────────── Dibujo ─────────────
+const scene = document.getElementById('scene'), over = document.getElementById('over');
+function cablePath() { const p = [[0, 20, 12], [-12, 20, 2], [-40, 4, 1], [-62, -8, 1], [-84, -16, 3]].map(([x, y, z]) => P(x, y, z)); return 'M' + p.map((q) => f1(q[0]) + ' ' + f1(q[1])).join('L'); }
+const CABLE = cablePath();
+function render(s) {
+  const all = sortItems(items.concat(dynamicItems(s)));
+  let out = `<path d="${CABLE}" fill="none" stroke="#1f2a5a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="${CABLE}" fill="none" stroke="#f1c40f" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  for (const it of all) {
+    if (it.draw) out += it.draw();
+    else { if (!it.noFaces) out += (it.svg || (it.svg = it.static === false ? '' : boxSvg(it))); }
+    if (it.dyn) out += it.dyn(s);
+  }
+  scene.innerHTML = out; over.innerHTML = overlaySvg(s);
+}
+// ───────────── Interfaz y motor ─────────────
+const TEXTS = ['Ponemos dos rebanadas de pan en las ranuras. ¡Están blanditas y tienen mucha agua adentro!', 'Giramos la perilla al nivel __N__. Cuanto más alto el número, más tiempo se queda el pan al calor.', 'Bajamos la palanca. ¡Clac! Un gancho la sujeta y el resorte se aprieta, listo para empujar el pan hacia arriba.', 'La electricidad pasa por los hilos y se calientan: primero grises, luego naranjas y por fin rojos.', 'El calor entra en el pan y el agua se vuelve vapor: ¡psss! Mientras quede agua, el pan casi no se dora.', 'Ahora la superficie ya está seca y bien caliente. ¡Se pone dorada y crujiente!', '¡Se acabó el tiempo! El gancho se suelta y el resorte empuja las tostadas hacia arriba. ¡Pop!', 'Sacamos las tostadas con cuidado y las ponemos en el plato. ¡A comer!'];
+const NAMES = ['Introducir 2 rebanadas', 'Seleccionar nivel __N__', 'Bajar la palanca', 'Calentar las resistencias', 'Evaporar la humedad', 'Dorar el pan', 'Hacer saltar las tostadas', 'Retirar el pan'];
+const VIS = [3, 2, 2, 5, 9, 9, 2.5, 3.5];
+let t = 0, done = 0, running = -1, speed = 1, shade = 4, mode = 'manual', autoWait = 0, summary = null;
+try { mode = localStorage.getItem('tostador-modo') === 'auto' ? 'auto' : 'manual'; } catch (e) {}
+const $ = (id) => document.getElementById(id);
+const stepsEl = $('steps'), btns = [];
+NAMES.forEach((n, i) => { const li = document.createElement('li'), b = document.createElement('button'); b.className = 'step'; b.innerHTML = `<span class="n">${i + 1}</span><span class="tx"></span>`; b.onclick = () => play(i); li.appendChild(b); stepsEl.appendChild(li); btns.push(b); });
+const IND = [['NIVEL', 'lvl'], ['TIEMPO', 'time'], ['RESISTENCIAS', 'tr'], ['SUPERFICIE DEL PAN', 'ts'], ['HUMEDAD', 'w'], ['DORADO', 'b'], ['ENERGÍA', 'e']];
+$('ind').innerHTML = IND.map(([n, id]) => `<div class="card"><small>${n}</small>${id === 'lvl' ? '<div class="lvl"><button id="lm" aria-label="Bajar nivel">−</button><b id="lvl">4</b><button id="lp" aria-label="Subir nivel">+</button></div>' : `<b id="${id}">–</b>`}</div>`).join('');
+$('lm').onclick = () => setShade(shade - 1); $('lp').onclick = () => setShade(shade + 1);
+function setShade(v) { if (done > 1 || running >= 0) return; shade = clamp(v, 1, 6); refresh(); }
+const mm = (v) => String(Math.floor(v / 60)).padStart(2, '0') + ':' + String(Math.floor(v % 60)).padStart(2, '0');
+function sched() { return schedule(shade); }
+function play(i) { if (running >= 0 || i !== done) return; running = i; const [a, b] = sched()[i]; speed = (b - a) / VIS[i]; t = a; if (i === 0) summary = null; refresh(); }
+function reset() { t = 0; done = 0; running = -1; speed = 1; autoWait = 0; refresh(); }
+function setMode(m) { mode = m; try { localStorage.setItem('tostador-modo', m); } catch (e) {} $('mMan').setAttribute('aria-pressed', m === 'manual'); $('mAut').setAttribute('aria-pressed', m === 'auto'); if (m === 'auto' && running < 0) autoWait = 0.3; }
+$('mMan').onclick = () => setMode('manual'); $('mAut').onclick = () => setMode('auto'); $('reset').onclick = reset;
+const SW = [['Amarillo', '#ffe58a', '#f5c518', '#d4960c'], ['Menta', '#c4efdc', '#8fd3b6', '#62ad90'], ['Coral', '#ffc2b6', '#f07a6a', '#c4533f'], ['Cielo', '#cfe6f8', '#8fc0e8', '#5b92c2'], ['Crema', '#fffaf0', '#efe6d0', '#cbbf9f']];
+function paint(i) { const [, l, m, d] = SW[i], r = document.documentElement.style; r.setProperty('--yL', l); r.setProperty('--yM', m); r.setProperty('--yD', d); [...$('sw').children].forEach((b, k) => b.setAttribute('aria-pressed', k === i)); try { localStorage.setItem('tostador-color', i); } catch (e) {} }
+$('sw').innerHTML = SW.map(([n, , m]) => `<button title="${n}" aria-label="Color ${n}" style="background:${m}"></button>`).join(''); [...$('sw').children].forEach((b, i) => b.onclick = () => paint(i));
+function stateNow() { return simulateToaster(t, shade, { dialStart: 1 }); }
+function refresh() {
+  btns.forEach((b, i) => { b.className = 'step' + (i < done ? ' done' : i === running ? ' run' : i === done && running < 0 ? ' next' : ''); b.disabled = !(i === done && running < 0) || (mode === 'auto'); b.querySelector('.tx').textContent = NAMES[i].replace('__N__', shade); });
+  const k = running >= 0 ? running : done - 1;
+  $('bubble').textContent = k < 0 ? 'Pulsa el paso 1 para empezar.' : TEXTS[k].replace('__N__', shade) + (running < 0 && done < 8 ? ' → Pulsa el paso ' + (done + 1) + '.' : '');
+  $('lm').disabled = done > 1 || running >= 0 || shade <= 1; $('lp').disabled = done > 1 || running >= 0 || shade >= 6;
+}
+const last = {}; const setT = (id, v) => { if (last[id] !== v) { last[id] = v; $(id).textContent = v; } };
+function frame(s) {
+  setT('lvl', String(shade)); setT('time', mm(s.cycle) + ' / ' + mm(s.T)); setT('tr', Math.round(s.Tr) + ' °C'); setT('ts', Math.round(s.Ts) + ' °C');
+  setT('w', s.W.toFixed(2) + ' g'); setT('b', Math.round(s.B) + ' %'); setT('e', s.kWh.toFixed(4) + ' kWh');
+  const bd = $('badge'); const show = running >= 0 && Math.abs(speed - 1) > 0.05; bd.hidden = !show; if (show) setT('badge', '×' + (speed >= 10 ? speed.toFixed(0) : speed.toFixed(speed % 1 ? 1 : 0)) + ' rápido');
+}
+// ───────────── Comprobación del modelo (consola) ─────────────
+function verify(L, quiet) {
+  const T = cycleSeconds(L), end = MODEL.LATCH + T + 6, errs = []; let pW = 3, pB = 0, pE = 0, maxTr = 0, maxTs = 0, wetBrown = 0, last = null;
+  for (let e = 0; e <= end; e += 0.5) { const r = simulateToaster(e, L, { dialStart: 1 });
+    if (r.Tr > 600.001 || r.Ts > Math.max(r.Tr, 20) + 1e-6 || r.Ts < 19.99) errs.push('temperatura fuera de rango en t=' + e);
+    if (r.W > pW + 1e-9 || r.W < 0) errs.push('humedad no decrece en t=' + e); if (r.B < pB - 1e-9 && e < MODEL.LATCH + T) errs.push('dorado baja en t=' + e);
+    if (r.kWh < pE - 1e-12) errs.push('energía baja en t=' + e); if (r.W / 3 > 0.8 && r.B > 1) wetBrown = Math.max(wetBrown, r.B);
+    pW = r.W; pB = r.B; pE = r.kWh; maxTr = Math.max(maxTr, r.Tr); maxTs = Math.max(maxTs, r.Ts); last = r; }
+  const expect = MODEL.P_W * T / 3.6e6; if (Math.abs(last.kWh - expect) > 1e-5) errs.push('energía ≠ P·t'); if (wetBrown > 0) errs.push('dorado con pan húmedo');
+  const res = { nivel: L, duracion_s: T, humedad_final_g: +last.W.toFixed(2), dorado_pct: +last.B.toFixed(1), energia_kWh: +last.kWh.toFixed(4), energia_esperada_kWh: +expect.toFixed(4), maxResist_C: Math.round(maxTr), maxPan_C: Math.round(maxTs), estado_final: last.final, ok: !errs.length, errores: errs };
+  if (!quiet) { console.log('[tostador] resumen de comprobación', res); console.assert(res.ok, 'El modelo viola sus límites', errs); } return res;
+}
+window.__api = { verify, state: () => stateNow(), seek: (v) => { running = -1; t = v; draw(); }, play, reset, get t() { return t; }, get done() { return done; }, get running() { return running; }, setShade, setMode, sched, cycleSeconds, simulateToaster, render: () => draw() };
+// ───────────── Bucle ─────────────
+function draw() { const s = stateNow(); render(s); frame(s); }
+let prev = 0;
+function tick(now) {
+  const dt = prev ? Math.min((now - prev) / 1000, 0.05) : 0.016; prev = now;
+  if (running >= 0) { const [, b] = sched()[running]; t = Math.min(b, t + dt * speed); if (t >= b) { const i = running; done = running + 1; running = -1; speed = 1; refresh(); if (done === 8) { summary = verify(shade); autoWait = 2.2; } else if (mode === 'auto') autoWait = 0.35; } }
+  else if (mode === 'auto' && autoWait > 0) { autoWait -= dt; if (autoWait <= 0) { if (done >= 8) reset(); play(done); } }
+  draw(); requestAnimationFrame(tick);
+}
+paint((() => { try { const v = +localStorage.getItem('tostador-color'); return v >= 0 && v < 5 ? v : 0; } catch (e) { return 0; } })());
+setMode(mode); refresh(); verify(4);
+requestAnimationFrame(tick);
+</script></body></html>

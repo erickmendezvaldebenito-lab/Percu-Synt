@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="es">
+<!--
+=================================================================================
+ CAMPOS VISUAL — visualizador de líneas de campo para la PercuSynth
+=================================================================================
+ HARDWARE
+   Cualquiera de estas entradas (se pueden combinar):
+   - AUDIO: la salida de la PercuSynth (jack/PCM5102) a la entrada de línea del
+            computador, o simplemente el micrófono apuntando al parlante.
+   - MIDI:  firmwares MIDI_Drum / drum_midi_leds / trance_midi_leds (USB MIDI).
+   - SERIAL: firmware de control de video_synth (Web Serial, 115200 baud, 50 Hz).
+   - Sin placa: teclado (Z X C, espacio), clic en la pantalla y modo DEMO.
+
+ NAVEGADOR
+   Chrome / Edge (Web Serial, Web MIDI y getUserMedia). Un solo HTML, sin build.
+
+ DESCRIPCIÓN
+   Estilo "campos conectados": puntos rojos que son cargas (+ fuentes, − sumideros)
+   y líneas de corriente de colores que nacen en las fuentes y terminan en los
+   sumideros o se pierden fuera del cuadro. Cada golpe de percusión NACE un punto
+   nuevo; el resto de la imagen se mueve con lentitud.
+
+ FUNCIONAMIENTO
+   - Cada golpe se clasifica en 3 bandas: GRAVE (bombo), MEDIO (caja/toms) y
+     AGUDO (hats/metales). Grave = punto grande y fuerte abajo; agudo = punto
+     fino arriba; medio = al centro.
+   - Con audio, el golpe se detecta por flujo espectral por banda con umbral
+     adaptativo (media + k·desviación), así que sigue al volumen de la sala.
+   - Cada punto nace con fade-in, sus líneas CRECEN desde él en ~3 s, deriva con
+     velocidad muy baja y al envejecer se desvanece. Un golpe de su banda hace
+     brillar sus líneas y las hace girar un poco (todo suavizado, nada salta).
+   - Colores: ARCOÍRIS (cada línea de un color, como en los dibujos) o POR PUNTO.
+
+ TECLADO
+   Z/X/C golpe grave/medio/agudo · Espacio golpe al azar · clic = golpe medio ahí
+   A audio · M midi · S serial · D demo · P paleta · H panel · F pantalla completa
+=================================================================================
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campos Visual</title>
+<style>
+  :root{ --bg:#07070b; --fg:#d9dbe6; --dim:#7b7f93; --acc:#ff4d4d; --pn:rgba(14,14,22,.72); }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  canvas{position:fixed;inset:0;display:block;width:100%;height:100%;object-fit:contain}
+  #panel{position:fixed;top:14px;left:14px;width:250px;padding:12px;border-radius:12px;
+    background:var(--pn);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.08);
+    transition:opacity .6s}
+  #panel.hide{opacity:0;pointer-events:none}
+  h1{font-size:12px;letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px;color:var(--dim);font-weight:600}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  button{background:#171722;color:var(--fg);border:1px solid #2b2b3b;border-radius:8px;padding:6px 9px;
+    font:inherit;cursor:pointer}
+  button:hover{border-color:#4a4a66}
+  button.on{border-color:var(--acc);color:#fff;background:#2a1519}
+  #sMode,#sRender,#sCal{display:block;margin-bottom:8px}
+  select{width:100%;background:#171722;color:var(--fg);border:1px solid #2b2b3b;border-radius:8px;
+    padding:5px;font:inherit;margin-bottom:8px;display:none}
+  label{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-top:6px}
+  input[type=range]{width:100%;accent-color:var(--acc)}
+  .bars{display:flex;gap:6px;margin-top:10px;height:34px;align-items:flex-end}
+  .bar{flex:1;background:#171722;border-radius:4px;position:relative;height:100%;overflow:hidden}
+  .bar i{position:absolute;left:0;right:0;bottom:0;background:var(--acc);height:0}
+  .bar span{position:absolute;left:0;right:0;top:2px;text-align:center;font-size:9px;color:var(--dim);z-index:1}
+  #src{font-size:12px;padding:6px 8px;border-radius:8px;background:#171722;margin-bottom:8px;color:var(--dim)}
+  #src.ok{background:#12301f;color:#7dffb0}
+  #src.mic{background:#3a2a10;color:#ffcf6b}
+  #msg{margin-top:8px;color:var(--dim);font-size:11px;min-height:15px}
+  #start{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:16px 26px;font-size:16px;
+    border-radius:14px;background:rgba(30,12,16,.85);border-color:var(--acc);color:#fff;backdrop-filter:blur(6px)}
+  #start small{display:block;color:var(--dim);font-size:11px;margin-top:4px}
+  #start.gone{display:none}
+  #prog{position:fixed;left:0;right:0;bottom:18px;text-align:center;font-size:13px;color:#fff;text-shadow:0 0 6px #000;display:none;z-index:5}
+  #hint{position:fixed;left:0;right:0;bottom:24px;text-align:center;color:var(--dim);font-size:12px;
+    opacity:.0;transition:opacity 1s;pointer-events:none}
+  #hint.show{opacity:.8}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="panel">
+  <h1>Campos visual · v5</h1>
+  <div id="src">Entrada: ninguna</div>
+  <div class="row">
+    <button id="bAudio">🎙 Audio</button>
+    <button id="bBridge">🔌 Mixer (puente)</button>
+    <button id="bSys" title="Toma el sonido que suena en una pestaña de Chrome (YouTube, Spotify web…)">🖥 Audio del computador</button>
+    <button id="bMidi">🎹 MIDI</button>
+    <button id="bSerial">⚡ Serial</button>
+    <button id="bDemo" class="on">▶ Demo</button>
+  </div>
+  <select id="dev"></select>
+  <div class="row">
+    <select id="sMode" title="Modo visual (teclas 1-8 o V)"></select>
+    <select id="sCal" title="Calidad de imagen"><option value="alta">Calidad: Alta (1,5×)</option><option value="max">Calidad: Máxima (nativa 2×, más pesada)</option><option value="auto">Calidad: Auto (baja solo si va muy lento)</option></select>
+    <button id="bMirror">🪞 Espejo: no</button>
+    <button id="bCycle">🌈 Ciclo color: no</button>
+    <button id="bReel">📱 Formato Reel</button>
+    <button id="bFile">📁 Cargar audio</button>
+    <button id="bRec" title="Graba exactamente lo que ves y oyes, solo mientras está en REC. Se guarda al instante">⏺ Grabar (REC)</button>
+    <button id="bRecA" title="Opcional: graba el sonido y al detener vuelve a dibujar el video en 4K (tarda y las imágenes no son idénticas a lo que viste)">🎬 Grabar y recrear en 4K (lento)</button>
+    <select id="sRender" title="Tamaño del video final"><option value="4k">Video final: 4K (2160×3840)</option><option value="1080">Video final: 1080p (1080×1920)</option></select>
+    <select id="sRecK" title="Resolución de ⏺ Grabar (REC)"><option value="1.333">REC: 1440×2560 (2K)</option><option value="1">REC: 1080×1920 (Full HD, más fluida)</option><option value="1.5">REC: 1620×2880 (máxima, pesada)</option><option value="2">REC: 2160×3840 (4K real, MUY pesada: pierde cuadros)</option></select>
+    <button id="bRender">🎬 Renderizar MP4 fluido (60 fps)</button>
+    <input type="file" id="fileIn" accept="audio/*" style="display:none">
+    <button id="bPal">🎨 Arcoíris</button>
+    <button id="bFull">⛶ Pantalla</button>
+  </div>
+  <label>Sensibilidad <span id="vSens"></span></label>
+  <input type="range" id="sens" min="0" max="100" value="85">
+  <label>Lentitud del movimiento <span id="vSpd"></span></label>
+  <input type="range" id="spd" min="10" max="150" value="55">
+  <label>Densidad de líneas <span id="vDen"></span></label>
+  <input type="range" id="den" min="40" max="160" value="100">
+  <label>Vibración con el ritmo (los objetos se mueven con cada golpe)</label>
+  <input type="range" id="pul" min="0" max="150" value="80">
+  <label>Caos (reglas ↔ azar) <span id="vCao"></span></label>
+  <input type="range" id="cao" min="0" max="100" value="50">
+  <label>Sincronía: retraso de la imagen <span id="vDly"></span></label>
+  <input type="range" id="dly" min="0" max="400" value="0" title="Súbelo si la imagen se adelanta al sonido (parlantes Bluetooth, retraso de salida)">
+  <div id="fps" style="color:var(--dim);font-size:11px;margin-top:8px"></div>
+  <div class="bars">
+    <div class="bar"><span>GRAVE</span><i id="l0"></i></div>
+    <div class="bar"><span>MEDIO</span><i id="l1"></i></div>
+    <div class="bar"><span>AGUDO</span><i id="l2"></i></div>
+  </div>
+  <div id="msg">Demo activa: conecta una entrada para tocar tú.</div>
+</div>
+<button id="start">🎙 Escuchar la PercuSynth<small>salida de la placa → entrada de línea o micrófono del computador</small></button>
+<div id="prog"></div>
+<div id="hint">Z · X · C golpes · clic · H panel · F pantalla completa</div>
+
+<script src="mp4-muxer.js"></script>
+<script>
+'use strict';
+/* ============================ lienzo y escala ============================ */
+const C=document.getElementById('c'), g=C.getContext('2d');
+var grabando=false, recTrack=null, recK=1.333;   // recK: tamaño de la grabación directa respecto a 1080×1920
+let W=0,H=0,U=1,reel=false,reelK=1;   // reelK: tamaño de la VISTA en formato Reel (1 = 1080×1920). El render final elige 1080p o 4K aparte (menú) y la vista vuelve a su tamaño                       // U = unidad de escala (px de dispositivo)
+function bgColor(){ if(typeof mode==='undefined')return '#07070b'; return (mode===5||mode===7||mode===9)?'#fff':((mode===6||mode===8)?'#000':'#07070b'); }   // Humo GPU y Abanico claro: papel blanco · Abanico: negro
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,((typeof calidad!=='undefined'&&calidad==='max')||(typeof grabando!=='undefined'&&grabando))?2:1.5)*(typeof qScale!=='undefined'?qScale:1), ow=W, oh=H;
+  if(typeof reel!=='undefined'&&reel){ const kk=reelK*(enRender?1:qScale)*((typeof grabando!=='undefined'&&grabando&&!enRender)?recK:1); W=C.width=Math.round(1080*kk); H=C.height=Math.round(1920*kk); }   // 9:16; la vista baja sola si no alcanza, el render final NO
+  else { W=C.width=Math.max(2,Math.floor(innerWidth*dpr)); H=C.height=Math.max(2,Math.floor(innerHeight*dpr)); }
+  U=Math.min(W,H)/800;
+  for(const c of (typeof charges!=='undefined'?charges:[])){      // los puntos acompañan al cambio de tamaño
+    if(ow>10&&oh>10){ c.x*=W/ow; c.y*=H/oh; } else { c.x=rnd(.1,.9)*W; c.y=rnd(.1,.9)*H; }
+  }
+  g.fillStyle=bgColor(); g.fillRect(0,0,W,H);
+}
+addEventListener('resize',resize);
+
+/* ============================ parámetros ============================ */
+const $=id=>document.getElementById(id);
+const PAL=['#ff4545','#ff9a2e','#ffe14a','#6fe08a','#38d8c8','#4f86ff','#a064f2','#ff80b8','#f0f0f0'];
+const MAXC=20, GROW_S=1.5, FADE_IN_S=0.22, FADE_OUT_S=3.0, KICK_S=1.8;
+const set={ sens:.55, speed:.55, dens:1, rainbow:true, caos:.5 };
+function readSliders(){
+  set.sens=$('sens').value/100; set.speed=$('spd').value/100; set.dens=$('den').value/100;
+  $('vSens').textContent=Math.round(set.sens*100)+'%';
+  $('vSpd').textContent=Math.round(set.speed*100)+'%';
+  set.caos=$('cao').value/100; $('vCao').textContent=Math.round(set.caos*100)+'%';
+  $('vDen').textContent=Math.round(set.dens*100)+'%';
+}
+['sens','spd','den','cao'].forEach(i=>$(i).addEventListener('input',readSliders)); readSliders();
+(function(){ try{ const v=localStorage.getItem('cvDly'); if(v!==null) $('dly').value=v; }catch(e){}
+  const ap=()=>{ const ms=+$('dly').value; $('vDly').textContent=ms+' ms'; if(dlyNode) dlyNode.delayTime.value=ms/1000; try{localStorage.setItem('cvDly',ms);}catch(e){} };
+  $('dly').addEventListener('input',ap); ap(); })();
+
+/* ============================ cargas ============================ */
+let charges=[], nextId=0, T=0, DT=1/60;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const smooth=t=>t*t*(3-2*t);
+
+function netCharge(){ let s=0; for(const c of charges) if(!c.dying) s+=c.q; return s; }
+function livePos(){ return charges.filter(c=>!c.dying&&c.q>0).length; }
+
+/* band: 0 grave, 1 medio, 2 agudo · strength 0..1 · xn,yn opcionales (0..1) */
+function hit(band,strength,xn,yn){
+  strength=clamp(strength??0.7,0.2,1);
+  // todos los puntos de la misma banda brillan y giran un poco (sincronía visible)
+  for(const c of charges) if(c.band===band&&!c.dying){
+    c.kick=Math.max(c.kick,0.55+0.45*strength);
+    c.rotT+= (c.dir)*(0.10+0.22*strength);
+    // golpe físico: impulso a un resorte amortiguado (vibra unos ciclos). Graves = empuje grande hacia fuera, agudos = temblor corto
+    const vib=(+$('pul').value)/100, A=[16,6,3][band]*U*strength*vib, cx=W/2, cy=H/2;
+    let rx=c.x-cx, ry=c.y-cy; const rl=Math.hypot(rx,ry)||1; rx/=rl; ry/=rl;
+    const ang=band===0?0:rnd(-1.2,1.2), ca=Math.cos(ang), sa=Math.sin(ang), W0=2*Math.PI*(band===0?6:band===1?9:13);
+    c.ovx=(c.ovx||0)+(rx*ca-ry*sa)*A*W0; c.ovy=(c.ovy||0)+(rx*sa+ry*ca)*A*W0; c.ow=W0;
+    const vm=W0*[18,7,3.5][band]*U*Math.max(0.2,vib), sv=Math.hypot(c.ovx,c.ovy); if(sv>vm){ c.ovx*=vm/sv; c.ovy*=vm/sv; }   // tope: golpes seguidos no acumulan sacudidas enormes
+  }
+  flash[band]=1; hitPulse[band]=1; if(band===0) beat=Math.max(beat,0.55+0.45*strength);
+  inkQ.push([band,strength]); if(inkQ.length>40) inkQ.shift();
+  // onda de choque inmediata: se VE el golpe en el mismo instante, aunque el resto sea lento
+  let nw=0; for(const c of charges){ if(c.band===band&&!c.dying&&nw<5){ waves.push({x:c.x,y:c.y,t:0,col:c.col,s:strength}); nw++; } }
+  if(band===0&&nw===0) waves.push({x:W*(0.5+rnd(-.1,.1)),y:H*0.6,t:0,col:Math.floor(rnd(0,9)),s:strength});   // el bajo SIEMPRE deja una onda visible
+  // y nace un punto nuevo (con enfriamiento por banda: una ráfaga de hats no llena la pantalla)
+  if(T-lastSpawn[band]<SPAWN_GAP[band]) return;
+  lastSpawn[band]=T;
+  const live=charges.filter(c=>!c.dying);
+  if(live.length>=MAXC){ // retira el más viejo
+    live.sort((a,b)=>b.age-a.age)[0].dying=true;
+  }
+  const yr=[[.55,.92],[.22,.78],[.06,.45]][band];
+  let best=null,bd=-1;
+  for(let k=0;k<9;k++){
+    const x=(xn!=null&&k===0)?xn*W:rnd(.07,.93)*W;
+    const y=(yn!=null&&k===0)?yn*H:rnd(yr[0],yr[1])*H;
+    let md=1e9; for(const c of charges){ if(c.dying)continue; md=Math.min(md,Math.hypot(c.x-x,c.y-y)); }
+    if(k===0&&xn!=null){ best={x,y}; bd=1e9; break; }
+    if(md>bd){bd=md;best={x,y};}
+  }
+  const mag=[1.7,1.0,0.6][band]*(0.75+0.5*strength);
+  let q;
+  const net=netCharge();
+  if(livePos()===0) q=mag;                       // siempre debe haber alguna fuente
+  else q=(Math.random()<(net>0.4?0.30:net<-0.4?0.80:0.58))?mag:-mag;
+  charges.push({
+    id:nextId++, x:best.x, y:best.y, q, band,
+    vx:0,vy:0, tvx:0,tvy:0, tChange:0,
+    age:0, life:rnd(18,32), dying:false, dyingT:0, alpha:0,
+    grow:0, kick:1, rot:rnd(0,6.283), rotT:0, dir:Math.random()<.5?-1:1,
+    col:nextId%PAL.length,
+    n:clamp(Math.round((band===0?12:band===1?10:8)*(0.8+0.5*strength)),6,22)
+  });
+  const c=charges[charges.length-1]; c.rotT=c.rot; waves.push({x:c.x,y:c.y,t:0,col:c.col,s:strength+.3});
+}
+const waves=[], inkQ=[];   // inkQ: golpes pendientes para el modo Tinta
+const flash=[0,0,0], lastSpawn=[-9,-9,-9], SPAWN_GAP=[0.14,0.22,0.45];
+let beat=0; const hitPulse=[0,0,0];   // beat: pulso global del bajo (decae ~150 ms) · hitPulse: un destello por golpe y banda (lo ven las barras del panel)
+
+/* ============================ campo y líneas ============================ */
+const CAP=64;   // vivos (≤MAXC) + los que se están desvaneciendo
+let cx=new Float32Array(CAP), cy=new Float32Array(CAP), cq=new Float32Array(CAP), cn=0;
+let ex=0,ey=0;
+function field(x,y){
+  let fx=0,fy=0; const e2=(3*U)*(3*U);
+  for(let i=0;i<cn;i++){
+    const dx=x-cx[i], dy=y-cy[i], d2=dx*dx+dy*dy+e2, k=cq[i]/d2;
+    fx+=dx*k; fy+=dy*k;
+  }
+  ex=fx; ey=fy;
+}
+const PTS=new Float32Array(2*260);
+function trace(x0,y0,maxSteps){
+  const h=6.5*U, mg=40*U, sink2=(7*U)*(7*U);
+  let x=x0,y=y0,n=1; PTS[0]=x; PTS[1]=y;
+  for(let s=0;s<maxSteps;s++){
+    field(x,y); let m=Math.hypot(ex,ey); if(m<1e-9)break;
+    const mx=x+ex/m*h*.5, my=y+ey/m*h*.5;
+    field(mx,my); m=Math.hypot(ex,ey); if(m<1e-9)break;
+    x+=ex/m*h; y+=ey/m*h;
+    PTS[2*n]=x; PTS[2*n+1]=y; n++;
+    if(x<-mg||x>W+mg||y<-mg||y>H+mg)break;
+    let hitSink=false;
+    for(let i=0;i<cn;i++){
+      if(cq[i]<0){ const dx=x-cx[i],dy=y-cy[i]; if(dx*dx+dy*dy<sink2){ PTS[2*(n-1)]=cx[i]; PTS[2*(n-1)+1]=cy[i]; hitSink=true; break; } }
+    }
+    if(hitSink)break;
+  }
+  return n;
+}
+
+/* ============================ actualización ============================ */
+function update(dt){
+  T+=dt; DT=dt;
+  const sp=set.speed*set.speed*1.6+0.05;      // curva suave: abajo es casi quieto
+  for(const c of charges){
+    c.age+=dt;
+    if(!c.dying && c.age>c.life && charges.length>3) c.dying=true;
+    if(c.dying) c.dyingT+=dt;
+    const aIn=smooth(clamp(c.age/FADE_IN_S,0,1));
+    const aOut=c.dying?1-smooth(clamp(c.dyingT/FADE_OUT_S,0,1)):1;
+    c.alpha=aIn*aOut;
+    c.grow=Math.min(1,c.grow+dt/GROW_S);
+    c.kick=Math.max(0,c.kick-dt/KICK_S);
+    // giro: lento y constante + empujón suavizado de los golpes
+    c.rotT+=c.dir*0.035*dt*sp*3;
+    c.rot+=(c.rotT-c.rot)*(1-Math.exp(-dt*1.1));
+    // deriva: velocidad objetivo cambia cada 6–10 s, la velocidad la sigue con tau ≈ 3 s
+    c.tChange-=dt;
+    if(c.tChange<=0){
+      c.tChange=rnd(6,10); const a=rnd(0,6.283), v=rnd(6,22)*U;
+      c.tvx=Math.cos(a)*v; c.tvy=Math.sin(a)*v;
+    }
+    const mx=W*.06,my=H*.06;
+    if(c.x<mx)c.tvx=Math.abs(c.tvx); if(c.x>W-mx)c.tvx=-Math.abs(c.tvx);
+    if(c.y<my)c.tvy=Math.abs(c.tvy); if(c.y>H-my)c.tvy=-Math.abs(c.tvy);
+    const k=1-Math.exp(-dt/3);
+    c.vx+=(c.tvx-c.vx)*k; c.vy+=(c.tvy-c.vy)*k;
+    c.x+=c.vx*dt*sp; c.y+=c.vy*dt*sp;
+    if(c.ow){ const w=c.ow, n=Math.min(16,Math.max(2,Math.ceil(dt*w/0.3))), h=dt/n;   // resorte amortiguado (zeta 0,16)
+      for(let i=0;i<n;i++){ c.ovx+=(-w*w*(c.ox||0)-2*0.16*w*c.ovx)*h; c.ovy+=(-w*w*(c.oy||0)-2*0.16*w*c.ovy)*h; c.ox=(c.ox||0)+c.ovx*h; c.oy=(c.oy||0)+c.ovy*h; }
+      if(Math.abs(c.ox)+Math.abs(c.oy)+Math.abs(c.ovx)*0.01+Math.abs(c.ovy)*0.01<0.05){ c.ox=c.oy=c.ovx=c.ovy=0; c.ow=0; } }
+  }
+  charges=charges.filter(c=>!(c.dying&&c.dyingT>=FADE_OUT_S));
+  for(let b=0;b<3;b++){ flash[b]=Math.max(0,flash[b]-dt*3.5); hitPulse[b]*=Math.exp(-dt*9); }
+  beat*=Math.exp(-dt*6.5);
+  for(let i=waves.length-1;i>=0;i--){ waves[i].t+=dt; if(waves[i].t>0.9) waves.splice(i,1); }
+}
+
+/* ============================ dibujo ============================ */
+var enRender=false;   // true mientras se exporta: ahí el tamaño es el del menú, sin resolución adaptativa
+var calidad='alta';   // alta = 1,5× (como antes) · max = 2× nativa · auto = 1,5× y baja solo si va a menos de 25 fps
+var qScale=1, dlyNode=null;   // dlyNode: retraso del análisis para alinear la imagen con el sonido que SALE por los parlantes   // resolución adaptativa: baja sola si el equipo no alcanza (no afecta a Reel ni al render)
+var mode=0;   // 0 = campo (líneas de corriente) · 1 = malla que se deforma
+function drawMesh(){
+  g.globalCompositeOperation='source-over';
+  g.fillStyle='rgba(7,7,11,0.6)'; g.fillRect(0,0,W,H);
+  const fl=Math.max(flash[0],flash[1]*.7,flash[2]*.5,0.5*cont[0]);
+  if(fl>.03){ g.fillStyle='rgba(255,70,70,'+(0.07*fl).toFixed(3)+')'; g.fillRect(0,0,W,H); }
+  const ws=charges.filter(c=>c.alpha>.02);
+  const SEG=100;
+  g.lineCap='round'; g.lineJoin='round';
+  for(let pass=0;pass<2;pass++){
+    const n=pass?20:34;
+    for(let i=0;i<n;i++){
+      const base=(i+.5)/n*(pass?W:H);
+      g.strokeStyle=pass?'#8f95c4':PAL[i%PAL.length];
+      g.globalAlpha=pass?0.28+0.25*fl:0.78;
+      g.lineWidth=(pass?0.8:1.0+1.3*fl)*U;
+      g.beginPath();
+      for(let sg=0;sg<=SEG;sg++){
+        const t=sg/SEG, x=pass?base:t*W, y=pass?t*H:base;
+        let dx=0,dy=0;
+        for(const c of ws){
+          const ax=x-c.x, ay=y-c.y, d2=ax*ax+ay*ay, sig=(60+35*Math.abs(c.q))*U;
+          if(d2>9*sig*sig)continue;
+          const fb=Math.max(flash[c.band],0.6*cont[c.band]);
+          const k=-Math.sign(c.q)*0.17*c.alpha*(0.45+0.9*c.kick*c.kick+0.8*fb)*Math.min(Math.abs(c.q),1.7)/1.3;
+          const gs=Math.exp(-d2/(2*sig*sig))*k; dx+=ax*gs; dy+=ay*gs;
+        }
+        for(const w of waves){
+          const ax=x-w.x, ay=y-w.y, d=Math.sqrt(ax*ax+ay*ay)+1e-3, kk=w.t/0.9;
+          const r=(10+330*(1-Math.pow(1-kk,3)))*U, q=(d-r)/(45*U);
+          if(q>3||q<-3)continue;
+          const a=Math.exp(-q*q)*(1-kk)*(0.4+0.6*w.s)*38*U/d; dx+=ax*a; dy+=ay*a;
+        }
+        const dl=Math.sqrt(dx*dx+dy*dy), cap=70*U;
+        if(dl>1e-3){ const f=cap*Math.tanh(dl/cap)/dl; dx*=f; dy*=f; }   // tope suave: la malla se curva, no se enreda
+        if(sg===0)g.moveTo(x+dx,y+dy); else g.lineTo(x+dx,y+dy);
+      }
+      g.stroke();
+    }
+  }
+  for(const c of ws){
+    g.globalAlpha=c.alpha; g.fillStyle='#ff3030';
+    g.beginPath(); g.arc(c.x,c.y,(3.4+4.5*flash[c.band]+5*hitPulse[c.band])*U*(0.6+0.4*c.alpha),0,6.2832); g.fill();
+  }
+  g.globalAlpha=1;
+}
+const MODES=['Campo','Malla','Constelación','Ondas','Flujo','Humo GPU','Abanico','Abanico claro','Abanico curvo','Abanico curvo claro'];
+const PAL0=PAL.slice(), HUES=[0,32,54,138,176,222,268,330];
+let mirror=0, cycleOn=false, hueShift=0;
+function rebuildPal(){
+  hueShift=(hueShift+DT*14)%360;
+  for(let i=0;i<8;i++) PAL[i]='hsl('+((HUES[i]+hueShift)%360).toFixed(0)+' 100% 62%)';
+}
+function trailFill(a){ g.globalCompositeOperation='source-over'; g.fillStyle='rgba(7,7,11,'+a+')'; g.fillRect(0,0,W,H); }
+function draw(){
+  if(cycleOn) rebuildPal();
+  for(const c of charges){ if(c.ow){ c.x+=c.ox; c.y+=c.oy; } }   // la vibración se suma solo al dibujar
+  [drawField,drawMesh,drawConst,drawRipples,drawFlow,drawSmokeGL,()=>drawFan(false),()=>drawFan(true),()=>drawFan(false,true),()=>drawFan(true,true)][mode]();
+  for(const c of charges){ if(c.ow){ c.x-=c.ox; c.y-=c.oy; } }
+  if(mirror) applyMirror();
+}
+function applyMirror(){
+  g.save(); g.globalCompositeOperation='source-over'; g.globalAlpha=1;
+  g.translate(W,0); g.scale(-1,1); g.drawImage(C,0,0,W/2,H,0,0,W/2,H); g.restore();
+  if(mirror===2){ g.save(); g.translate(0,H); g.scale(1,-1); g.drawImage(C,0,0,W,H/2,0,0,W,H/2); g.restore(); }
+}
+function dots(ws){
+  for(const c of ws){
+    g.globalAlpha=c.alpha; g.fillStyle='#ff3030';
+    g.beginPath(); g.arc(c.x,c.y,(3.4+4.5*flash[c.band]+5*hitPulse[c.band])*U*(0.6+0.4*c.alpha),0,6.2832); g.fill();
+  }
+  g.globalAlpha=1;
+}
+
+/* ---- CONSTELACIÓN: estrellas que se conectan por cercanía; cada golpe enciende las de su banda ---- */
+let stars=[];
+function ensureStars(){
+  if(stars.length)return;
+  for(let i=0;i<70;i++) stars.push({bx:rnd(.03,.97),by:rnd(.03,.97),ax:rnd(.01,.05),ay:rnd(.01,.05),w:rnd(.05,.14),ph:rnd(0,6.28),b:i%3});
+}
+function drawConst(){
+  ensureStars(); trailFill(0.5);
+  const pts=[], ws=charges.filter(c=>c.alpha>.02);
+  for(const c of ws) pts.push({x:c.x,y:c.y,a:c.alpha,b:c.band,col:c.col});
+  for(const st of stars) pts.push({x:(st.bx+st.ax*Math.sin(T*st.w+st.ph))*W, y:(st.by+st.ay*Math.cos(T*st.w*.8+st.ph))*H, a:.6, b:st.b, col:st.b*3+1});
+  const D=(230+50*Math.max(flash[0],flash[1],flash[2]))*U; g.lineCap='round';
+  for(let i=0;i<pts.length;i++){ const A=pts[i];
+    for(let j=i+1;j<pts.length;j++){ const B=pts[j];
+      const dx=A.x-B.x, dy=A.y-B.y, d2=dx*dx+dy*dy; if(d2>D*D)continue;
+      const k=1-Math.sqrt(d2)/D, fb=Math.max(flash[A.b],flash[B.b],0.5*cont[A.b],0.5*cont[B.b]);
+      g.globalAlpha=clamp(Math.pow(k,1.2)*Math.min(A.a,B.a)*(0.85+1.1*fb),0,1);
+      g.strokeStyle=PAL[(A.col+B.col)%PAL.length]; g.lineWidth=(1.0+1.4*k+2.4*fb)*U;
+      g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.stroke();
+    }
+  }
+  for(const P of pts.slice(ws.length)){
+    g.globalAlpha=clamp(0.5+0.5*flash[P.b],0,1); g.fillStyle=PAL[P.col%PAL.length];
+    g.beginPath(); g.arc(P.x,P.y,(1.3+2.8*flash[P.b])*U,0,6.2832); g.fill();
+  }
+  dots(ws);
+}
+
+/* ---- ONDAS: anillos que nacen de cada punto y se expanden lento; el golpe los ondula y lanza uno grande ---- */
+function drawRipples(){
+  // Antes: ~28 puntos × 7 anillos × 72 segmentos con trazos gruesos de uniones redondas = 80 ms/cuadro (medido, con sincronización) y 2 fps en el Mac.
+  // Ahora: los 12 puntos más fuertes, 4 anillos, segmentos según el radio, uniones en ángulo y TODOS los anillos del mismo estilo en un solo trazo.
+  trailFill(0.45); g.lineCap='butt'; g.lineJoin='miter';
+  const ws=charges.filter(c=>c.alpha>.05), K=5;
+  const top=ws.slice().sort((a,b)=>Math.abs(b.q)*b.alpha-Math.abs(a.q)*a.alpha).slice(0,14);
+  const lotes=new Map();                                              // clave = color·nivel de opacidad·grosor → polilíneas
+  for(const c of top){
+    const fb=Math.max(flash[c.band],0.6*cont[c.band]), Rmax=(280+120*Math.abs(c.q))*U;
+    for(let k=0;k<K;k++){
+      const ph=((T*0.12*(0.6+set.speed)*(1+0.6*cont[c.band])+k/K+c.id*0.137)%1), r=ph*Rmax;
+      const al=clamp((1-ph)*c.alpha*(0.55+0.6*fb+0.3*c.kick),0,1); if(al<0.05||r<4*U)continue;
+      const nivel=al<0.25?0:al<0.5?1:2, gr=fb>0.45?1:0, col=(c.col+k)%PAL.length, clave=col*6+nivel*2+gr;
+      const seg=Math.max(20,Math.min(52,Math.round(r/(5.5*U)))), pol=[];
+      for(let i=0;i<=seg;i++){ const an=i/seg*6.2832, rr=r*(1+(0.05+0.10*fb)*Math.sin(5*an+T*1.1*(k%2?1:-1)+c.id+k)); pol.push(c.x+Math.cos(an)*rr,c.y+Math.sin(an)*rr); }
+      let l=lotes.get(clave); if(!l){ l=[]; lotes.set(clave,l); } l.push(pol);
+    }
+  }
+  const OP=[0.2,0.45,0.8];
+  for(const [clave,l] of lotes){
+    const gr=clave%2, nivel=(clave>>1)%3, col=Math.floor(clave/6);
+    g.globalAlpha=OP[nivel]; g.strokeStyle=PAL[col]; g.lineWidth=(gr?2.6:1.3)*U; g.beginPath();
+    for(const pol of l){ g.moveTo(pol[0],pol[1]); for(let i=2;i<pol.length;i+=2) g.lineTo(pol[i],pol[i+1]); }
+    g.stroke();
+  }
+  for(const w of waves.slice(-8)){                                    // solo las 8 ondas más nuevas (cada una es un círculo grande)
+    const k=w.t/0.9, r=(10+240*(1-Math.pow(1-k,3)))*U;
+    g.globalAlpha=(1-k)*(0.5+0.4*w.s); g.strokeStyle=PAL[w.col%PAL.length]; g.lineWidth=(3*(1-k)+0.6)*U;
+    g.beginPath(); g.arc(w.x,w.y,r,0,6.2832); g.stroke();
+  }
+  dots(ws);
+}
+
+/* ---- FLUJO: miles de partículas que siguen el campo de los puntos (con giro) y dejan estela larga ---- */
+const NP=1400, PX=new Float32Array(NP), PY=new Float32Array(NP), PAGE=new Float32Array(NP), PLIFE=new Float32Array(NP);
+let pInit=false;
+function respawn(i){
+  const pos=charges.filter(c=>c.q>0&&c.alpha>.05);
+  if(pos.length){ const c=pos[Math.floor(Math.random()*pos.length)], a=rnd(0,6.2832), r=rnd(4,40)*U; PX[i]=c.x+Math.cos(a)*r; PY[i]=c.y+Math.sin(a)*r; }
+  else { PX[i]=rnd(0,W); PY[i]=rnd(0,H); }
+  PAGE[i]=0; PLIFE[i]=rnd(3,9);
+}
+const FX0=new Float32Array(NP), FY0=new Float32Array(NP);
+function drawFlow(){
+  if(!pInit){ for(let i=0;i<NP;i++){ respawn(i); PAGE[i]=rnd(0,5); } pInit=true; }
+  trailFill(0.10);
+  cn=0;
+  for(const c of charges){ if(c.alpha<.02||cn>=CAP)continue; cx[cn]=c.x; cy[cn]=c.y; cq[cn]=c.q*c.alpha; cn++; }
+  const fl=Math.max(flash[0],flash[1]*.7,flash[2]*.5,0.5*cont[0]);
+  const sp=(45+90*fl)*U*(0.4+set.speed), ca=Math.cos(.8), sa=Math.sin(.8), sink2=(8*U)*(8*U);
+  for(let i=0;i<NP;i++){
+    FX0[i]=PX[i]; FY0[i]=PY[i];
+    field(PX[i],PY[i]); const m=Math.hypot(ex,ey);
+    if(m<1e-9||!isFinite(m)){ respawn(i); continue; }
+    const ux=ex/m, uy=ey/m, vx=ux*ca-uy*sa, vy=ux*sa+uy*ca;
+    PX[i]+=vx*sp*DT; PY[i]+=vy*sp*DT; PAGE[i]+=DT;
+    let kill=PAGE[i]>PLIFE[i]||PX[i]<-20||PX[i]>W+20||PY[i]<-20||PY[i]>H+20;
+    if(!kill) for(let k=0;k<cn;k++) if(cq[k]<0){ const dx=PX[i]-cx[k],dy=PY[i]-cy[k]; if(dx*dx+dy*dy<sink2){kill=true;break;} }
+    if(kill){ respawn(i); FX0[i]=PX[i]; FY0[i]=PY[i]; }
+  }
+  g.lineWidth=(1.3+0.8*fl)*U; g.lineCap='round'; g.globalAlpha=0.6+0.4*fl;
+  for(let ci=0;ci<PAL.length;ci++){
+    g.strokeStyle=PAL[ci]; g.beginPath();
+    for(let i=ci;i<NP;i+=PAL.length){ g.moveTo(FX0[i],FY0[i]); g.lineTo(PX[i],PY[i]); }
+    g.stroke();
+  }
+  dots(charges.filter(c=>c.alpha>.02));
+}
+
+/* estado compartido del núcleo y los 3 satélites (lo usa Humo GPU) */
+const NK=4, ink={cx:0,cy:0,vx:0,vy:0,tx:0,ty:0,init:false,exp:0,swl:0}, KX=new Float32Array(NK), KY=new Float32Array(NK), KVX=new Float32Array(NK), KVY=new Float32Array(NK);
+
+/* ---- HUMO GPU (WebGL2) — calibrado cuadro a cuadro contra la referencia (TouchDesigner, incrprl.dsgn) ----
+   Qué hace la referencia (mirado en tu grabación): (1) un núcleo diminuto casi negro con rayitas radiales cortas; (2) una red de "venas" muy
+   tenues que cubre TODO el cuadro: son las líneas de corriente de un campo de ruido que arrastra humo desde el núcleo; (3) HACES de 3-8 curvas
+   finas y paralelas que cruzan el cuadro: trayectorias newtonianas (secciones cónicas) de partículas lanzadas juntas desde el núcleo con casi la
+   misma velocidad, atraídas por él. Eso es todo: reglas precisas (gravedad + campo de ruido sin divergencia) y caos (ruido, azar de lanzamiento).
+   Aquí: 409.600 partículas en la GPU en tres clases — VENAS (≈88 %, siguen el campo, nacen en el núcleo y mueren al azar), NÚCLEO (≈12 %, resorte
+   corto + remolino) y HACES (≈0,2 %, gravedad pura, se relanzan en grupos con cada golpe de bajo/medio). Dos capas con persistencia distinta
+   (A venas+núcleo, B haces) que se multiplican (blanco = 1). */
+const TEXN=640, NGL=TEXN*TEXN;
+let gl=null, glc=null, glOK=null, glReset=true, glP={}, glFb=[null,null], glTx=[null,null], glCur=0, glFrame=0, glVao=null;
+const GLT={av:1,ac:1.0,al:0.5};   // ganancias de la capa (calibradas midiendo la fracción de píxeles oscuros contra la referencia)
+let glImp={r:0,t:0,j:0}, glLay={fb:[null,null],tx:[null,null]}, glBurstQ=[];
+const GLSL_HASH=`uint hu(uint x){ x^=x>>16; x*=0x7feb352du; x^=x>>15; x*=0x846ca68bu; x^=x>>16; return x; }
+float hf(uint x){ return float(hu(x))/4294967296.0; }
+int cls(uint id){ float h=hf(id*23u+7u); return h<0.0009?2:(h<0.12?1:0); }   // 0 vena · 1 núcleo · 2 haz`;
+function glSh(type,src){ const o=gl.createShader(type); gl.shaderSource(o,src); gl.compileShader(o); if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; }
+function glProg(vs,fs){ const p=gl.createProgram(); gl.attachShader(p,glSh(gl.VERTEX_SHADER,vs)); gl.attachShader(p,glSh(gl.FRAGMENT_SHADER,fs)); gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; }
+function glInit(){
+  glc=document.createElement('canvas'); glc.width=W; glc.height=H;
+  gl=glc.getContext('webgl2',{alpha:false,antialias:false,preserveDrawingBuffer:true});
+  if(!gl||!gl.getExtension('EXT_color_buffer_float')) throw new Error('WebGL2 con texturas float no disponible');
+  const H3='#version 300 es\nprecision highp float; precision highp int;\n#define TEX '+TEXN+'\n'+GLSL_HASH+'\n';
+  const quadVS=H3+'out vec2 vUv; void main(){ vec2 v=vec2((gl_VertexID<<1)&2, gl_VertexID&2); vUv=v; gl_Position=vec4(v*2.0-1.0,0.0,1.0); }';
+  glP.upd=glProg(quadVS,H3+`
+    uniform sampler2D uState; uniform vec2 uK[4]; uniform vec2 uKV[4]; uniform vec2 uRes;
+    uniform float uDt,uT,uR0,uU,uSpr,uS,uBr,uImpR,uImpT,uJit,uFrame,uCaos,uVein,uGm,uE,uV0,uBurstOn,uBurstGrp,uBurstAng,uBurstSpd; uniform vec2 uWind;
+    out vec4 o;
+    // campo sin divergencia (derivadas de una función de corriente): líneas de corriente = las "venas"; 3 octavas, las altas escalan con el caos
+    vec2 curl(vec2 p,float t){
+      vec2 v=vec2(0.0); float sc=1.0/uU;
+      for(int i=0;i<3;i++){
+        float fi=float(i), kx=(0.0030+0.0021*fi)*sc*(1.0+0.37*fi), ky=(0.0024+0.0019*fi)*sc*(1.0-0.21*fi);
+        float px=kx*p.x+1.3*fi+t*(0.11+0.05*fi), py=ky*p.y+0.7+2.1*fi-t*(0.09+0.04*fi);
+        float amp=(i==0)?1.0:((i==1)?0.7*(0.4+uCaos):0.5*uCaos), n=1.0/length(vec2(kx,ky));
+        v+=amp*n*vec2(ky*sin(px)*cos(py), -kx*cos(px)*sin(py));
+      }
+      return v; }
+    void main(){
+      ivec2 p=ivec2(gl_FragCoord.xy); uint id=uint(p.y*TEX+p.x); vec4 s=texelFetch(uState,p,0);
+      int cl=cls(id); uint fr=uint(uFrame);
+      if(cl==2){                                                   // HAZ: gravedad newtoniana alrededor del núcleo principal
+        vec2 d=s.xy-uK[0]; float r2=dot(d,d)+uE*uE; s.zw-=d*uGm/(r2*sqrt(r2))*uDt; s.zw*=exp(-uDt*0.02); s.xy+=s.zw*uDt;
+        bool lanza=(uBurstOn>0.5)&&(hu(id*3u+1u)%48u==uint(uBurstGrp));
+        bool azar=hf(id*43u+fr)<uDt/5.0||dot(d,d)>uRes.x*uRes.x*4.0||any(isnan(s));
+        if(azar&&!lanza) s=vec4(uK[0],0.0,0.0);      // al morir un arco, la partícula queda aparcada en el núcleo hasta el próximo golpe: nada de órbitas sueltas
+        if(lanza){ float a=uBurstAng+(hf(id*31u+fr)-0.5)*0.10, sp=uBurstSpd*(0.965+0.07*hf(id*37u+fr));
+          vec2 dir=vec2(cos(a),sin(a)); s=vec4(uK[0]+dir*uE*0.35,dir*sp+uKV[0]*0.4); }
+        o=s; return; }
+      int c=(id%7u<3u)?0:int(1u+id%3u); vec2 K=uK[c], d=s.xy-K; float dist=length(d)+1e-3; vec2 u=d/dist, tg=vec2(-u.y,u.x);
+      float fall=1.0/(1.0+dist/uR0);
+      s.zw+=u*uImpR*300.0*uU*fall+tg*uImpT*200.0*uU*fall;
+      if(cl==1){                                                   // NÚCLEO: resorte corto + remolino + ruido
+        float ir=pow(hf(id*3u+1u),2.6)*uR0*1.4, ph=hf(id*5u+2u)*6.2831;
+        if(uJit>0.0&&(id&3u)==0u) s.zw+=(vec2(hf(id*11u+fr),hf(id*13u+fr))*2.0-1.0)*uJit*200.0*uU;
+        float vr=clamp(-(dist-ir*uBr)*uSpr,-340.0*uU,340.0*uU), vt=uS*(0.45+0.55*exp(-dist/uR0))*(((c&1)==1)?-1.0:1.0);
+        vec2 tb=vec2(sin(s.y*0.02/uU+uT*0.4+ph),cos(s.x*0.02/uU-uT*0.33+ph))*150.0*uU*(0.4+uCaos);
+        s.zw+=(u*vr+tg*vt+tb+uWind*0.7+uKV[c]*0.9-s.zw)*(1.0-exp(-uDt*2.5)); s.xy+=s.zw*uDt;
+        if(dist>uR0*5.0||any(isnan(s))){ float a=hf(id*17u+fr)*6.2831; s=vec4(K+vec2(cos(a),sin(a))*ir,0.0,0.0); }
+        o=s; return; }
+      // VENA: nace en el núcleo/satélites, sale radial y se deja llevar por el campo; vida media ~2,6 s
+      vec2 tgt=curl(s.xy,uT)*uVein+u*uVein*0.10+uWind*0.9;
+      s.zw+=(tgt-s.zw)*(1.0-exp(-uDt*1.6)); s.xy+=s.zw*uDt;
+      if(hf(id*41u+fr)<uDt/2.6||dist>uR0*60.0||any(isnan(s))){ float a=hf(id*17u+fr)*6.2831, r=uR0*1.3*hf(id*19u+fr);
+        vec2 dir=vec2(cos(a),sin(a)); s=vec4(K+dir*r,dir*uVein*(0.6+1.4*hf(id*59u+fr))); }
+      o=s; }`);
+  glP.pts=glProg(H3+`uniform sampler2D uState; uniform vec2 uRes; uniform float uU,uExp,uAv,uAc; out float vA;
+    void main(){ int id=gl_VertexID; int cl=cls(uint(id)); if(cl!=1){ gl_Position=vec4(3.0,3.0,3.0,1.0); return; }
+      vec4 s=texelFetch(uState,ivec2(id%TEX,id/TEX),0); vec2 c=s.xy/uRes*2.0-1.0; c.y=-c.y; gl_Position=vec4(c,0.0,1.0);
+      float h=hf(uint(id)*31u+5u);
+      if(cl==1){ gl_PointSize=mix(1.6,4.2,h*h)*uU*(1.0+0.3*uExp); vA=uAc; } else { gl_PointSize=mix(1.3,2.4,h)*uU; vA=uAv; } }`,
+    H3+`in float vA; out vec4 o; void main(){ vec2 q=gl_PointCoord*2.0-1.0; float r2=dot(q,q); if(r2>1.0) discard; o=vec4(0.0,0.0,0.0,vA*exp(-r2*2.5)); }`);
+  glP.lin=glProg(H3+`uniform sampler2D uState; uniform vec2 uRes; uniform float uDt,uFrac; uniform int uCls;
+    void main(){ int id=gl_VertexID>>1; if(cls(uint(id))!=uCls||hf(uint(id)*61u+9u)>=uFrac){ gl_Position=vec4(3.0,3.0,3.0,1.0); return; }
+      vec4 s=texelFetch(uState,ivec2(id%TEX,id/TEX),0);
+      vec2 q=((gl_VertexID&1)==1)?s.xy:s.xy-s.zw*uDt; vec2 c=q/uRes*2.0-1.0; c.y=-c.y; gl_Position=vec4(c,0.0,1.0); }`,
+    H3+`uniform float uA; out vec4 o; void main(){ o=vec4(0.0,0.0,0.0,uA); }`);
+  glP.fade=glProg(quadVS,H3+`uniform float uA; out vec4 o; void main(){ o=vec4(1.0,1.0,1.0,uA); }`);
+  glP.comp=glProg(quadVS,H3+`uniform sampler2D uA_,uB_; in vec2 vUv; out vec4 o; void main(){ o=vec4(texture(uA_,vUv).rgb*texture(uB_,vUv).rgb,1.0); }`);
+  glVao=gl.createVertexArray(); gl.bindVertexArray(glVao);
+  for(let i=0;i<2;i++){
+    glTx[i]=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glTx[i]);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,TEXN,TEXN,0,gl.RGBA,gl.FLOAT,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    glFb[i]=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,glFb[i]); gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,glTx[i],0);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+function glLayers(){                                   // dos capas RGBA8 del tamaño del lienzo: A = venas+núcleo, B = haces
+  for(let i=0;i<2;i++){
+    if(glLay.tx[i]){ gl.deleteTexture(glLay.tx[i]); gl.deleteFramebuffer(glLay.fb[i]); }
+    glLay.tx[i]=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glLay.tx[i]);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,W,H,0,gl.RGBA,gl.HALF_FLOAT,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    glLay.fb[i]=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,glLay.fb[i]); gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,glLay.tx[i],0);
+    gl.viewport(0,0,W,H); gl.clearColor(1,1,1,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+function glSeed(){
+  glc.width=W; glc.height=H;
+  const a=new Float32Array(NGL*4), R0=Math.min(W,H)*0.05;
+  for(let i=0;i<NGL;i++){ const an=Math.random()*6.2832, r=Math.pow(Math.random(),2.0)*R0*4; a[4*i]=W/2+Math.cos(an)*r; a[4*i+1]=H/2+Math.sin(an)*r; }
+  for(let i=0;i<2;i++){ gl.bindTexture(gl.TEXTURE_2D,glTx[i]); gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,TEXN,TEXN,gl.RGBA,gl.FLOAT,a); }
+  glCur=0; ink.init=false; glLayers(); glReset=false;
+}
+function drawSmokeGL(){
+  if(glOK===false){ mode=0; return; }
+  if(glOK===null){ try{ glInit(); glOK=true; }catch(e){ glOK=false; msg('Humo GPU: '+e.message); mode=0; showMode(); return; } }
+  if(glc.width!==W||glc.height!==H||glReset) glSeed();
+  const R0=Math.min(W,H)*0.05, dt=DT, fl=Math.max(flash[0],flash[1]*.8,flash[2]*.6);
+  if(!ink.init){ ink.cx=ink.tx=W/2; ink.cy=ink.ty=H/2; for(let k=0;k<NK;k++){KX[k]=ink.cx;KY[k]=ink.cy;} ink.init=true; }
+  const t=T*0.12*(0.4+set.speed);
+  ink.tx=W*(0.5+0.2*Math.sin(t*1.3)+0.07*Math.sin(t*3.1)); ink.ty=H*(0.5+0.16*Math.cos(t*1.1)+0.06*Math.sin(t*2.7));
+  while(inkQ.length){ const q=inkQ.shift(), b=q[0], st=q[1];
+    if(b===0){ ink.exp=Math.min(2.2,ink.exp+1.2*st); const a=rnd(0,6.2832); ink.vx+=Math.cos(a)*st*380*U; ink.vy+=Math.sin(a)*st*380*U; glImp.r+=st; glBurstQ.push([rnd(0,6.2832),0.86+0.12*st]); }
+    else if(b===1){ ink.swl=Math.min(2.2,ink.swl+1.1*st); glImp.t+=st; glBurstQ.push([rnd(0,6.2832),0.84+0.12*st]); }
+    else glImp.j+=st; }
+  if(glBurstQ.length>6) glBurstQ.splice(0,glBurstQ.length-6);
+  ink.exp*=Math.exp(-dt*1.1); ink.swl*=Math.exp(-dt*0.8);
+  ink.vx+=(ink.tx-ink.cx)*dt*3.2; ink.vy+=(ink.ty-ink.cy)*dt*3.2;
+  const dk=Math.exp(-dt*2.4); ink.vx*=dk; ink.vy*=dk; ink.cx+=ink.vx*dt; ink.cy+=ink.vy*dt;
+  ink.cx=Math.min(W*0.62,Math.max(W*0.38,ink.cx)); ink.cy=Math.min(H*0.6,Math.max(H*0.4,ink.cy));
+  const K=new Float32Array(8), KV=new Float32Array(8);
+  for(let k=0;k<NK;k++){
+    const a=T*(0.23+0.11*k)*(0.4+set.speed)+k*2.1, rr=R0*2.4*(1.0+0.6*Math.sin(T*0.17*k+k))*(1+0.6*ink.exp);
+    const nx=k?ink.cx+Math.cos(a)*rr:ink.cx, ny=k?ink.cy+Math.sin(a)*rr*0.8:ink.cy;
+    KV[2*k]=(nx-KX[k])/dt; KV[2*k+1]=(ny-KY[k])/dt; KX[k]=nx; KY[k]=ny; K[2*k]=nx; K[2*k+1]=ny;
+  }
+  // 1) simulación en la GPU
+  const TU=window.GLTUNE||GLT, nxt=1-glCur, V0=430*U, E=R0*0.9, Gm=V0*V0*R0*0.643, bu=glBurstQ.shift();
+  gl.bindVertexArray(glVao); gl.disable(gl.BLEND);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,glFb[nxt]); gl.viewport(0,0,TEXN,TEXN);
+  gl.useProgram(glP.upd); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,glTx[glCur]);
+  const L=n=>gl.getUniformLocation(glP.upd,n), U1=(n,v)=>gl.uniform1f(L(n),v);
+  gl.uniform1i(L('uState'),0); gl.uniform2fv(L('uK'),K); gl.uniform2fv(L('uKV'),KV); gl.uniform2f(L('uRes'),W,H);
+  U1('uDt',dt); U1('uT',T); U1('uR0',R0); U1('uU',U); U1('uSpr',2.6+2.2*cont[0]); U1('uS',(70+80*cont[1])*U*(1+0.9*ink.swl));
+  U1('uBr',1+1.2*ink.exp); U1('uCaos',set.caos*2*(0.7+0.6*cont[2])); U1('uVein',(95+90*cont[1])*U*(0.6+0.8*(0.4+set.speed)));
+  U1('uImpR',glImp.r); U1('uImpT',glImp.t); U1('uJit',glImp.j); U1('uFrame',glFrame++);
+  U1('uGm',Gm); U1('uE',E); U1('uV0',V0);
+  const wa=0.9*Math.sin(T*0.13)+0.6*Math.sin(T*0.31+1), wm=(60+120*ink.exp)*U; gl.uniform2f(L('uWind'),Math.cos(wa)*wm,Math.sin(wa)*wm);
+  U1('uBurstOn',bu?1:0); U1('uBurstGrp',Math.floor(Math.random()*48)); U1('uBurstAng',bu?bu[0]:0); U1('uBurstSpd',bu?V0*bu[1]:0);
+  glImp.r=glImp.t=glImp.j=0;
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  glCur=nxt;
+  // 2) capa A (venas + núcleo) y capa B (haces, estela larga); el desvanecimiento depende del tiempo, no de los cuadros
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA); gl.viewport(0,0,W,H);
+  gl.bindTexture(gl.TEXTURE_2D,glTx[glCur]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,glLay.fb[0]);
+  gl.useProgram(glP.fade); gl.uniform1f(gl.getUniformLocation(glP.fade,'uA'),1-Math.exp(-dt/(0.85-0.25*fl))); gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.useProgram(glP.pts); let Lp=n=>gl.getUniformLocation(glP.pts,n);
+  gl.uniform1i(Lp('uState'),0); gl.uniform2f(Lp('uRes'),W,H); gl.uniform1f(Lp('uU'),U); gl.uniform1f(Lp('uExp'),ink.exp);
+  gl.uniform1f(Lp('uAv'),(0.011+0.012*fl)*TU.av); gl.uniform1f(Lp('uAc'),(0.030+0.03*fl)*TU.ac);
+  gl.drawArrays(gl.POINTS,0,NGL);
+  gl.useProgram(glP.lin); Lp=n=>gl.getUniformLocation(glP.lin,n);
+  gl.uniform1i(Lp('uState'),0); gl.uniform2f(Lp('uRes'),W,H); gl.uniform1f(Lp('uDt'),dt); gl.uniform1i(Lp('uCls'),1); gl.uniform1f(Lp('uFrac'),0.5); gl.uniform1f(Lp('uA'),(0.015+0.02*fl)*TU.ac); gl.drawArrays(gl.LINES,0,NGL*2);
+  gl.uniform1i(Lp('uCls'),0); gl.uniform1f(Lp('uFrac'),0.16); gl.uniform1f(Lp('uA'),(0.0019+0.003*fl)*TU.av);
+  gl.drawArrays(gl.LINES,0,NGL*2);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,glLay.fb[1]);
+  gl.useProgram(glP.fade); gl.uniform1f(gl.getUniformLocation(glP.fade,'uA'),1-Math.exp(-dt/1.7)); gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.useProgram(glP.lin); Lp=n=>gl.getUniformLocation(glP.lin,n);
+  gl.uniform1i(Lp('uState'),0); gl.uniform2f(Lp('uRes'),W,H); gl.uniform1f(Lp('uDt'),dt); gl.uniform1i(Lp('uCls'),2); gl.uniform1f(Lp('uFrac'),1.0); gl.uniform1f(Lp('uA'),(0.55+0.3*fl)*TU.al);
+  gl.drawArrays(gl.LINES,0,NGL*2);
+  // 3) composición: blanco = 1, se multiplican
+  gl.disable(gl.BLEND); gl.bindFramebuffer(gl.FRAMEBUFFER,null); gl.useProgram(glP.comp);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,glLay.tx[0]); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,glLay.tx[1]);
+  gl.uniform1i(gl.getUniformLocation(glP.comp,'uA_'),0); gl.uniform1i(gl.getUniformLocation(glP.comp,'uB_'),1);
+  gl.drawArrays(gl.TRIANGLES,0,3); gl.activeTexture(gl.TEXTURE0);
+  g.globalCompositeOperation='source-over'; g.globalAlpha=1; g.drawImage(glc,0,0,W,H);
+}
+
+/* ---- ABANICO (3D): celdas de una rejilla (bloques como dígitos/píxeles) en dos "paredes" curvas a los lados, unidas por una línea finísima a UN punto
+        de convergencia que también se mueve en 3D. La cámara gira despacio (yaw/pitch) y hay perspectiva: lo cercano es más grande y brillante.
+        Cada golpe enciende un bloque: graves abajo, medios al centro, agudos arriba. drawFan(true) = papel blanco con elementos negros. ---- */
+const fan={init:false,cols:[],rows:0,pitch:0,life:null,x:null,y:null,hubx:0,huby:0,kx:0,ky:0,kz:0,idle:0,w:0,h:0};
+function fanInit(){
+  const p=Math.max(5*U,W*0.0165); fan.pitch=p; fan.rows=Math.floor(H*0.9/p);
+  const xs=[]; for(let x=W*0.07;x<W*0.34;x+=p) xs.push(x); for(let x=W*0.62;x<W*0.935;x+=p) xs.push(x);
+  fan.cols=xs; const n=xs.length*fan.rows; fan.life=new Float32Array(n); fan.x=new Float32Array(n); fan.y=new Float32Array(n);
+  for(let c=0;c<xs.length;c++) for(let r=0;r<fan.rows;r++){ const i=c*fan.rows+r; fan.x[i]=xs[c]; fan.y[i]=H*0.05+r*p; }
+  fan.kx=fan.ky=fan.kz=0; fan.w=W; fan.h=H; fan.init=true;
+}
+function fanBlock(band,st){                                   // enciende un bloque rectangular de celdas, con algunos huecos
+  const nc=fan.cols.length, left=Math.random()<0.5, c0=left?0:fan.cols.findIndex(x=>x>W*0.5), cN=left?fan.cols.findIndex(x=>x>W*0.5):nc;
+  const bw=1+Math.floor(rnd(0.5,4)), bh=2+Math.floor(rnd(1,7+6*st));
+  const zona=[[0.62,0.97],[0.33,0.7],[0.04,0.4]][band];           // fracción vertical: graves abajo, medios al centro, agudos arriba
+  const r0=Math.floor(rnd(zona[0],zona[1])*fan.rows), cc=c0+Math.floor(rnd(0,Math.max(1,cN-c0-bw)));
+  for(let c=cc;c<Math.min(cN,cc+bw);c++) for(let r=r0;r<Math.min(fan.rows,r0+bh);r++){ if(Math.random()<0.3)continue; fan.life[c*fan.rows+r]=1; }
+}
+function drawFan(light,curved){
+  if(!fan.init||fan.w!==W||fan.h!==H) fanInit();
+  const dt=DT, n=fan.life.length, fg=light?'#000':'#fff';
+  g.globalCompositeOperation='source-over'; g.fillStyle=light?'rgba(255,255,255,0.55)':'rgba(0,0,0,0.55)'; g.fillRect(0,0,W,H);
+  while(inkQ.length){ const q=inkQ.shift(); fanBlock(q[0],q[1]);
+    if(q[0]===0){ fan.ky+=q[1]*0.05; fan.kx+=rnd(-1,1)*0.05*q[1]; fan.kz+=rnd(-1,1)*0.12*q[1]; } }
+  fan.idle-=dt; if(fan.idle<=0){ fan.idle=rnd(0.35,0.9)/(0.5+set.speed); fanBlock(Math.floor(Math.random()*3),0.3); }   // latido propio
+  const kd=Math.exp(-dt*2.2); fan.kx*=kd; fan.ky*=kd; fan.kz*=kd;
+  // cámara 3D: yaw/pitch lentos + perspectiva
+  const sp_=0.4+set.speed, yaw=0.45*Math.sin(T*0.19*sp_)+0.1*Math.sin(T*0.47*sp_), pit=0.18*Math.sin(T*0.13*sp_+1);
+  const cyw=Math.cos(yaw), syw=Math.sin(yaw), cpt=Math.cos(pit), spt=Math.sin(pit), F=1.8, M=Math.max(W,1);
+  const proj=(x,y,z)=>{ const X=x*cyw+z*syw, Z0=-x*syw+z*cyw, Y=y*cpt-Z0*spt, Z=y*spt+Z0*cpt, s=F/Math.max(0.35,F+Z); return [W/2+X*s*M, H/2+Y*s*M, s]; };
+  // punto de convergencia: órbita 3D propia (se mueve) + empujones del bajo
+  const hub=proj(0.17*Math.sin(T*0.31*sp_)+fan.kx, 0.40*H/M-0.5*H/M+0.10*Math.sin(T*0.23*sp_)+fan.ky+0.10*H/M, 0.30*Math.sin(T*0.27*sp_+2)+fan.kz);
+  const hx=hub[0], hy=hub[1];
+  const fl=Math.max(flash[0],flash[1]*.7,flash[2]*.5), deca=dt*(0.22+0.12*(1-cont[0]));
+  g.lineCap='butt'; g.strokeStyle=fg;
+  const niv=[0.18,0.38,0.62,0.9], haz=[[],[],[],[]], pts=[];
+  for(let i=0;i<n;i++){
+    const l=fan.life[i]; if(l<=0.01)continue;
+    fan.life[i]=l-deca;
+    const c=Math.floor(i/fan.rows), r=i%fan.rows, xn=(fan.x[i]-W/2)/M, yn=(fan.y[i]-H/2)/M;
+    const z=-0.55*Math.pow(Math.abs(xn)/0.45,1.5)+0.16*Math.sin(r*0.11+T*0.7*sp_+c*0.5);   // paredes que se curvan hacia la cámara y ondulan
+    const q=proj(xn,yn,z), a=Math.min(1,l*1.4)*Math.min(1.25,0.55+0.6*q[2]);
+    const k=a<niv[0]?0:a<niv[1]?1:a<niv[2]?2:3; haz[k].push(q[0],q[1],xn<0?-1:1); pts.push(q[0],q[1],l,q[2]);
+  }
+  for(let k=0;k<4;k++){
+    g.globalAlpha=Math.min(1,(niv[k]*0.5+0.08)*(0.7+0.5*fl)); g.lineWidth=(0.55+0.5*fl)*U; g.beginPath();
+    const h=haz[k];
+    if(curved){   // rayos curvos: el arco se abre hacia cada lado (lira) y respira; los graves lo cierran/abren de golpe
+      const cur=0.30+0.12*Math.sin(T*0.4*sp_)+0.55*fl+3*fan.ky;
+      for(let j=0;j<h.length;j+=3){ const px=h[j], py=h[j+1], dx=px-hx, dy=py-hy, b=cur*h[j+2];
+        g.moveTo(hx,hy); g.quadraticCurveTo((hx+px)/2-dy*b,(hy+py)/2+dx*b,px,py); }
+    } else for(let j=0;j<h.length;j+=3){ g.moveTo(hx,hy); g.lineTo(h[j],h[j+1]); }
+    g.stroke();
+  }
+  g.fillStyle=fg;
+  for(let j=0;j<pts.length;j+=4){ g.globalAlpha=Math.min(1,pts[j+2]*1.6+0.15); g.beginPath(); g.arc(pts[j],pts[j+1],1.9*U*pts[j+3],0,6.2832); g.fill(); }
+  g.globalAlpha=0.5+0.5*fl; g.beginPath(); g.arc(hx,hy,(1.6+3.5*flash[0])*U,0,6.2832); g.fill(); g.globalAlpha=1;
+}
+
+function drawField(){
+  g.globalCompositeOperation='source-over';
+  g.fillStyle='rgba(7,7,11,0.55)'; g.fillRect(0,0,W,H);          // estela corta: líneas nítidas
+  const fl=Math.max(flash[0],flash[1]*.7,flash[2]*.5,0.5*cont[0]);
+  if(fl>.03){ g.fillStyle='rgba(255,70,70,'+(0.06*fl).toFixed(3)+')'; g.fillRect(0,0,W,H); }
+  cn=0;
+  for(const c of charges){ if(c.alpha<.02||cn>=CAP)continue; cx[cn]=c.x; cy[cn]=c.y; cq[cn]=c.q*c.alpha; cn++; }
+  g.lineWidth=1.05*U; g.lineCap='round'; g.lineJoin='round';
+  const steps=Math.round(130+40*set.dens);
+  for(const c of charges){
+    if(c.q<=0||c.alpha<.02)continue;
+    const N=clamp(Math.round(c.n*set.dens),4,26);
+    const ease=1-Math.pow(1-c.grow,3);
+    const kk=c.kick*c.kick;
+    const fb=Math.max(flash[c.band],0.6*cont[c.band]);
+    g.globalAlpha=clamp(c.alpha*(0.55+0.3*kk+0.3*fb+0.2*fl),0,1);
+    g.lineWidth=(1.0+2.4*fb+0.8*fl)*U;
+    for(let k=0;k<N;k++){
+      const th=6.2832*k/N+c.rot;
+      const n=trace(c.x+Math.cos(th)*4*U, c.y+Math.sin(th)*4*U, steps);
+      const nd=Math.max(2,Math.floor(n*ease));
+      g.strokeStyle=PAL[(set.rainbow?(k+c.col):c.col)%PAL.length];
+      g.beginPath(); g.moveTo(PTS[0],PTS[1]);
+      for(let i=1;i<nd;i++) g.lineTo(PTS[2*i],PTS[2*i+1]);
+      g.stroke();
+      // flechas de sentido
+      for(const ai of [26,80]){
+        if(ai+1<nd){
+          const px=PTS[2*ai],py=PTS[2*ai+1],a=Math.atan2(PTS[2*ai+3]-py,PTS[2*ai+2]-px),s=4.2*U;
+          g.beginPath();
+          g.moveTo(px+Math.cos(a+2.55)*s,py+Math.sin(a+2.55)*s); g.lineTo(px,py);
+          g.lineTo(px+Math.cos(a-2.55)*s,py+Math.sin(a-2.55)*s); g.stroke();
+        }
+      }
+    }
+  }
+  // ondas de choque
+  for(const w of waves){
+    const k=w.t/0.9, r=(10+170*(1-Math.pow(1-k,3)))*U;
+    g.globalAlpha=(1-k)*(0.5+0.4*w.s); g.strokeStyle=PAL[w.col%PAL.length]; g.lineWidth=(2.4*(1-k)+0.6)*U;
+    g.beginPath(); g.arc(w.x,w.y,r,0,6.2832); g.stroke();
+  }
+  // puntos (cargas) + anillo de pulso
+  for(const c of charges){
+    if(c.alpha<.02)continue;
+    g.globalAlpha=c.alpha;
+    g.fillStyle='#ff3030'; g.beginPath(); g.arc(c.x,c.y,(3.4+4.5*flash[c.band]+5*hitPulse[c.band])*U*(0.6+0.4*c.alpha),0,6.2832); g.fill();
+    if(c.kick>.03){
+      g.globalAlpha=c.alpha*c.kick*.55; g.strokeStyle=PAL[c.col%PAL.length]; g.lineWidth=1.1*U;
+      g.beginPath(); g.arc(c.x,c.y,(7+34*(1-c.kick))*U,0,6.2832); g.stroke();
+      g.lineWidth=1.25*U;
+    }
+  }
+  g.globalAlpha=1;
+}
+
+/* ============================ bucle ============================ */
+let last=performance.now();
+let fpsN=0, fpsMs=0, fpsT=0, lentos=0, rapidos=0;
+function medir(ms,now){
+  fpsN++; fpsMs+=ms;
+  if(now-fpsT>=1000){
+    const fps=fpsN*1000/(now-fpsT), prom=fpsMs/fpsN; fpsN=0; fpsMs=0; fpsT=now;
+    $('fps').textContent=fps.toFixed(0)+' cuadros/s · '+prom.toFixed(1)+' ms por cuadro · calidad '+Math.round(qScale*100)+'%';
+    if(enRender||rec||calidad!=='auto') return;             // la resolución solo baja sola en "Auto" (y nunca bajo 70 %)
+    if(fps<25){ if(++lentos>=3&&qScale>0.7){ qScale=Math.max(0.7,qScale*0.85); resize(); lentos=0; rapidos=0; } }
+    else { lentos=0; if(fps>=45&&++rapidos>=3&&qScale<1){ qScale=Math.min(1,qScale*1.25); resize(); rapidos=0; } }
+  }
+}
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  if(audioOn) analyze(now);
+  if(demoOn) demoTick(dt);
+  const t0m=performance.now(); update(dt); draw(); medir(performance.now()-t0m,now);
+  if(recTrack&&recTrack.requestFrame) recTrack.requestFrame();   // un cuadro grabado por cada cuadro dibujado (sin repetidos ni saltos)
+  for(let b=0;b<3;b++){ lvl[b]*=.94; $('l'+b).style.height=Math.round(100*Math.max(Math.min(1,lvl[b]*0.5),hitPulse[b]))+'%'; }
+  $('start').classList.toggle('gone',audioOn||midiOn||serialOn);
+  $('hint').classList.toggle('show',charges.length===0||(now-lastMove>3500&&!demoOn&&charges.length<2));
+  requestAnimationFrame(frame);
+}
+
+/* ============================ DEMO ============================ */
+let demoOn=true, demoT=0, demoStep=-1;
+function demoTick(dt){
+  demoT+=dt; const bpm=92, sx=60/bpm/4, st=Math.floor(demoT/sx);
+  if(st!==demoStep){
+    demoStep=st; const s=st%16;
+    if([0,6,10].includes(s)) hit(0,rnd(.6,1));
+    if([4,12].includes(s)) hit(1,rnd(.55,.95));
+    if(s%2===0 && Math.random()<.55) hit(2,rnd(.35,.8));
+    if(s===14 && Math.random()<.5) hit(1,rnd(.3,.6));
+  }
+}
+function setDemo(v){ demoOn=v; $('bDemo').classList.toggle('on',v); $('bDemo').textContent=v?'■ Demo':'▶ Demo'; }
+$('bDemo').onclick=()=>setDemo(!demoOn);
+
+/* ============================ AUDIO (golpes por flujo espectral) ============================ */
+let actx=null,an=null,fbuf=null,stream=null,audioOn=false;
+const RANGES=[[30,160],[160,1800],[1800,9000]];
+const pk=[20,20,20], cont=[0,0,0], pe=[0,0,0], fm=[0,0,0], fv=[1,1,1], lastHit=[0,0,0], lvl=[0,0,0];
+/* Detector de ritmo: potencia LINEAL por banda desde el espectro (en dB, sin suavizado), onset = salto de ≥ X dB sobre el nivel de los ~200 ms anteriores.
+   GRAVE 35–130 Hz (bombo/bajo) · MEDIO 200–2500 Hz (caja, voces, sintes) · AGUDO 5–14 kHz (hats). Cada golpe llama hit() → imagen, pulso global y barras. */
+const BANDAS_HZ=[[35,130],[200,2500],[5000,14000]], det={h:[[],[],[]],lmax:[-200,-200,-200],last:[-1e9,-1e9,-1e9]};
+let fdb=null;
+function detectar(now,P){
+  const sens=set.sens, thr=[7.5-4.5*sens,6.5-4*sens,6-3.5*sens], gap=[110,80,55];
+  for(let b=0;b<3;b++){
+    const L=10*Math.log10(P[b]+1e-20), Hh=det.h[b];
+    det.lmax[b]=Math.max(L,det.lmax[b]-0.04);                           // referencia de volumen: el pico reciente baja ~2,4 dB/s
+    const rel=clamp((L-(det.lmax[b]-32))/32,0,1);
+    cont[b]=Math.pow(clamp((L-(det.lmax[b]-18))/18,0,1),2.2); lvl[b]=Math.max(rel,lvl[b]*.9);   // cont = nivel relativo al pico (como antes); el grosor/brillo por golpe viene solo de hit()
+    let ref=null; if(Hh.length>=10){ let sm=0,n=0; for(let i=0;i<Hh.length-3;i++){ sm+=Hh[i]; n++; } ref=sm/n; }
+    Hh.push(L); if(Hh.length>14) Hh.shift();
+    if(ref!==null && L-ref>thr[b] && rel>0.25 && now-det.last[b]>gap[b]){ det.last[b]=now; hit(b,clamp(0.4+(L-ref-thr[b])/10,0.4,1)); }
+  }
+}
+function analyze(now){
+  if(an.fftSize!==2048||!fdb){ an.fftSize=2048; an.smoothingTimeConstant=0; fdb=new Float32Array(an.frequencyBinCount); }
+  an.getFloatFrequencyData(fdb);
+  const binHz=actx.sampleRate/an.fftSize, P=[0,0,0];
+  for(let b=0;b<3;b++){ const i0=Math.max(1,Math.floor(BANDAS_HZ[b][0]/binHz)), i1=Math.min(fdb.length-1,Math.floor(BANDAS_HZ[b][1]/binHz)); let sm=0; for(let i=i0;i<=i1;i++) sm+=Math.pow(10,fdb[i]/10); P[b]=sm; }
+  detectar(now,P);
+}
+async function listDevices(){
+  const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+  const sel=$('dev'); const cur=sel.value; sel.innerHTML='';
+  ds.forEach((d,i)=>{ const o=document.createElement('option'); o.value=d.deviceId; o.textContent=d.label||('Entrada '+(i+1)); sel.appendChild(o); });
+  if(cur) sel.value=cur; sel.style.display=ds.length?'block':'none';
+}
+async function startAudio(){
+  stopAudio();
+  if(!startAudio.noBridge && await bridgeAvailable()){ try{localStorage.setItem('cvBridge','1');}catch(e){} await startBridge(); return; }   // si el puente del mixer está corriendo, se usa ese
+  let usoPuente=false; try{ usoPuente=localStorage.getItem('cvBridge')==='1'; }catch(e){}
+  if(usoPuente && !startAudio.forceMic){                              // ya usaste el mixer: NO caemos al micrófono por sorpresa
+    showSrc('✖ El puente del mixer no está corriendo','mic');
+    msg('Inicia el puente y vuelve a pulsar: en una Terminal →  cd /Users/erick/Desktop/Percu-Synth-main/tools/campos_visual && node puente_mixer.js   (o pulsa 🎙 con Mayús para usar el micrófono)');
+    return;
+  }
+  try{
+    let id=$('dev').value; try{ id=id||localStorage.getItem('cvDev')||''; }catch(e){}
+    stream=await navigator.mediaDevices.getUserMedia({audio:{deviceId:id?{exact:id}:undefined,
+      echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:{ideal:2}}});
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    await actx.resume();
+    const src=actx.createMediaStreamSource(stream);
+    an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.1;
+    an.minDecibels=-90; an.maxDecibels=-10; fbuf=new Uint8Array(an.frequencyBinCount);
+    src.connect(an);                      // no se conecta a la salida: sin realimentación
+    audioOn=true; setDemo(false); $('bAudio').classList.add('on');
+    await listDevices();
+    // prefiere una interfaz/mezcladora (DJM, Pioneer…) sobre el micrófono del computador
+    const pref=[...$('dev').options].find(o=>/djm|pioneer|interface|usb audio|scarlett|focusrite/i.test(o.textContent));
+    const cur0=stream.getAudioTracks()[0].getSettings().deviceId;
+    if(pref&&pref.value!==cur0&&!startAudio.retry){ startAudio.retry=true; $('dev').value=pref.value; await startAudio(); startAudio.retry=false; return; }
+    const cur=stream.getAudioTracks()[0].getSettings().deviceId; if(cur) $('dev').value=cur;
+    try{ localStorage.setItem('cvDev',cur||''); }catch(e){}
+    { const lb=stream.getAudioTracks()[0].label||'entrada de audio', mixer=/djm|pioneer|interface|usb audio|scarlett|focusrite/i.test(lb);
+      showSrc((mixer?'✔ Entrada: ':'⚠ Entrada (micrófono): ')+lb, mixer?'ok':'mic'); }
+    msg('Escuchando: '+(stream.getAudioTracks()[0].label||'entrada de audio')+'. Entradas que ve Chrome: '+[...$('dev').options].map(o=>o.textContent).join(' | '));
+  }catch(e){
+    msg('Audio: '+e.message+(e.name?' ('+e.name+')':'')+'. Entradas que ve Chrome: '+[...$('dev').options].map(o=>o.textContent).join(' | '));
+    try{ localStorage.removeItem('cvDev'); }catch(_){}
+  }
+}
+function stopAudio(){
+  if(bridgeAbort){ try{bridgeAbort.abort();}catch(e){} bridgeAbort=null; } bridgeOn=false; sysOn=false; $('bSys').classList.remove('on');
+  audioOn=false; showSrc('Entrada: ninguna',''); $('bAudio').classList.remove('on');
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+}
+$('bAudio').onclick=e=>{ if(audioOn){ stopAudio(); msg('Audio apagado.'); } else { startAudio.forceMic=e.shiftKey; startAudio(); } };
+$('dev').onchange=()=>startAudio();
+$('start').onclick=e=>{ e.stopPropagation(); startAudio.forceMic=e.shiftKey; startAudio(); };
+
+/* ============================ PUENTE DEL MIXER (puente_mixer.js) ============================
+   Chrome solo captura los canales 1-2 de una interfaz USB; la DJM-750MK2 manda la mezcla por los canales 3-12.
+   El puente (node + ffmpeg) toma el par correcto y lo sirve en http://127.0.0.1:8765/audio como PCM s16 44,1 kHz estéreo. */
+const BRIDGE='http://127.0.0.1:8765';
+let bridgeOn=false, bridgeAbort=null, bridgeStats=null, sysOn=false;
+async function bridgeAvailable(){
+  try{ const c=new AbortController(), t=setTimeout(()=>c.abort(),700);
+    const r=await fetch(BRIDGE+'/estado',{signal:c.signal}); clearTimeout(t); return r.ok; }catch(e){ return false; }
+}
+async function startBridge(ruta,etiqueta){
+  ruta=ruta||'/audio'; stopAudio();
+  actx=actx||new (window.AudioContext||window.webkitAudioContext)(); await actx.resume();
+  an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.1; an.minDecibels=-90; an.maxDecibels=-10;
+  fbuf=new Uint8Array(an.frequencyBinCount);
+  const mute=actx.createGain(); mute.gain.value=0; an.connect(mute); mute.connect(actx.destination);   // el analizador se procesa, sin sonar doble
+  recDest=actx.createMediaStreamDestination();
+  bridgeAbort=new AbortController();
+  // worklet con cola circular: reproduce continuo, sin huecos entre trozos y ajustando el ritmo para no acumular retraso
+  if(!startBridge.ready){
+    const code=`class P extends AudioWorkletProcessor{
+      constructor(){ super(); this.N=sampleRate*6|0; this.L=new Float32Array(this.N); this.R=new Float32Array(this.N);
+        this.w=0; this.rp=0; this.fr=0; this.fill=0; this.on=false; this.under=0; this.ratio=1; this.base=1; this.t=0; this.target=sampleRate*0.4; this.started=false;
+        this.port.onmessage=e=>{ const d=e.data; if(!d.length){ this.base=d.base; this.ratio=d.base; if(d.target) this.target=sampleRate*d.target; return; } const n=d.length>>1;
+          for(let i=0;i<n;i++){ this.L[this.w]=d[2*i]; this.R[this.w]=d[2*i+1]; this.w=(this.w+1)%this.N; }
+          this.fill+=n; if(this.fill>this.N-4){ const cut=this.fill-this.target|0; this.rp=(this.rp+cut)%this.N; this.fill-=cut; } }; }
+      process(_,out){ const o=out[0], n=o[0].length;
+        if(!this.on){ if(this.fill>=this.target*(this.started?0.5:1)){ this.on=true; this.started=true; } else return true; }
+        const err=Math.max(-1,Math.min(1,(this.fill-this.target)/this.target));
+        this.ratio+=((this.base*(1+0.01*err))-this.ratio)*0.002;
+        for(let i=0;i<n;i++){
+          if(this.fill<3){ this.under++; this.on=false; break; }
+          const a=this.rp, b=(a+1)%this.N, f=this.fr;
+          o[0][i]=this.L[a]*(1-f)+this.L[b]*f; o[1][i]=this.R[a]*(1-f)+this.R[b]*f;
+          this.fr+=this.ratio; while(this.fr>=1){ this.fr-=1; this.rp=(this.rp+1)%this.N; this.fill--; }
+        }
+        if((this.t+=n)>sampleRate){ this.t=0; this.port.postMessage({fill:this.fill,under:this.under,ratio:this.ratio}); }
+        return true; } }
+      registerProcessor('bridge',P);`;
+    await actx.audioWorklet.addModule('data:text/javascript;charset=utf-8,'+encodeURIComponent(code));   // data: porque blob: falla desde file://
+    startBridge.ready=true;
+  }
+  const node=new AudioWorkletNode(actx,'bridge',{numberOfInputs:0,outputChannelCount:[2]});
+  dlyNode=actx.createDelay(1); dlyNode.delayTime.value=(+$('dly').value)/1000; node.connect(dlyNode); dlyNode.connect(an); node.connect(recDest);
+  bridgeStats={fill:0,under:0,ratio:1}; node.port.onmessage=e=>{ bridgeStats=e.data; };
+  let r; try{ r=await fetch(BRIDGE+ruta+'?rate='+actx.sampleRate,{signal:bridgeAbort.signal}); if(!r.ok) throw new Error('HTTP '+r.status); }catch(e){ msg('El puente no responde: en una Terminal ejecuta  node puente_mixer.js'); return; }
+  bridgeOn=true; fileMode=false; audioOn=true; setDemo(false); $('bBridge').classList.add('on');
+  showSrc(etiqueta||'✔ Entrada: Mixer (puente, canales 9-10)','ok'); msg(etiqueta?'Escuchando el audio del Mac (sin cuadro de Chrome).':'Escuchando el mixer por el puente (sin micrófono).');
+  const srcRate=+(r.headers.get('X-Rate'))||actx.sampleRate;       // tasa real que entrega el puente (48000 con CoreAudio)
+  node.port.postMessage({length:0,base:srcRate/actx.sampleRate,target:0.06});   // colchón mínimo: este audio solo se analiza, así la imagen no llega 0,4 s tarde
+  const reader=r.body.getReader(); let rest=new Uint8Array(0);
+  (async()=>{ try{
+    while(bridgeOn){
+      const {value,done}=await reader.read(); if(done)break;
+      const all=new Uint8Array(rest.length+value.length); all.set(rest); all.set(value,rest.length);
+      const frames=Math.floor(all.length/4); rest=all.slice(frames*4);
+      if(!frames)continue;
+      const dv=new DataView(all.buffer,all.byteOffset), out=new Float32Array(frames*2);
+      for(let i=0;i<frames*2;i++) out[i]=dv.getInt16(i*2,true)/32768;
+      node.port.postMessage(out,[out.buffer]);
+    }
+  }catch(e){ if(bridgeOn) msg('Puente desconectado: '+e.message); } node.disconnect(); })();
+}
+$('bBridge').onclick=()=>{ startAudio.noBridge=false; startAudio(); };
+
+/* ---- AUDIO DEL COMPUTADOR: lo que suena en una pestaña de Chrome (YouTube, Spotify web, SoundCloud…) ----
+   Chrome en Mac no deja capturar el audio de TODO el sistema; sí el de una pestaña ("Compartir audio de la pestaña").
+   Para el audio de todo el sistema (Spotify de escritorio, Apple Music…) instala BlackHole y elígelo en el selector de entradas. */
+async function startSystem(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia){ msg('Este navegador no permite compartir audio (usa Chrome).'); return; }
+  stopAudio();
+  try{
+    const st=await navigator.mediaDevices.getDisplayMedia({video:true,audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const at=st.getAudioTracks();
+    if(!at.length){ st.getTracks().forEach(t=>t.stop()); msg('No llegó audio: en el cuadro de Chrome elige una PESTAÑA y activa "Compartir audio de la pestaña".'); return; }
+    st.getVideoTracks().forEach(t=>t.stop());                                     // el video no se usa
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)(); await actx.resume();
+    an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.1; an.minDecibels=-90; an.maxDecibels=-10; fbuf=new Uint8Array(an.frequencyBinCount);
+    stream=new MediaStream(at); const src=actx.createMediaStreamSource(stream);
+    src.connect(an); recDest=actx.createMediaStreamDestination(); src.connect(recDest);   // sin salida a parlantes: la pestaña ya suena sola
+    sysOn=true; fileMode=false; audioOn=true; setDemo(false); $('bSys').classList.add('on');
+    showSrc('✔ Entrada: audio de la pestaña compartida','ok'); msg('Escuchando el audio de la pestaña que compartiste. Pon la música ahí.');
+    at[0].onended=()=>{ stopAudio(); msg('Dejaste de compartir el audio.'); };
+  }catch(e){ msg('Audio del computador: '+(e.name==='NotAllowedError'?'cancelaste el cuadro de compartir':e.message)); }
+}
+$('bSys').onclick=async(e)=>{
+  // 1) sonido de TODO el Mac por el puente (ScreenCaptureKit): sin el cuadro "Compartiendo en esta pestaña"
+  try{ const c=new AbortController(), t=setTimeout(()=>c.abort(),700); const r=await fetch(BRIDGE+'/estado',{signal:c.signal}); clearTimeout(t);
+       const j=await r.json(); if(j.sistema){ await startBridge('/sistema','✔ Entrada: audio del Mac (sin compartir pestaña)'); if(bridgeOn){ $('bSys').classList.add('on'); return; } } }catch(e){}
+  // 2) sin puente NO abro ningún cuadro: solo si mantienes Mayús al hacer clic se usa compartir pestaña de Chrome
+  if(e&&e.shiftKey){ startSystem(); return; }
+  showSrc('✖ Falta el puente del audio del Mac','mic');
+  msg('Para tomar el sonido del Mac sin cuadros: haz doble clic en iniciar_puente.command (carpeta campos_visual) y vuelve a pulsar este botón. (Mayús+clic = compartir pestaña de Chrome.)');
+};
+
+/* ============================ ARCHIVO DE AUDIO + GRABACIÓN (para Reels) ============================ */
+let fileObj=null, fileEl=null, fileMode=false, recDest=null, rec=null, chunks=[];
+async function loadFile(f){
+  stopAudio();
+  actx=actx||new (window.AudioContext||window.webkitAudioContext)(); await actx.resume();
+  if(fileEl) fileEl.pause();
+  fileObj=f; fileEl=new Audio(); fileEl.src=URL.createObjectURL(f);
+  an=actx.createAnalyser(); an.fftSize=1024; an.smoothingTimeConstant=.1;
+  an.minDecibels=-90; an.maxDecibels=-10; fbuf=new Uint8Array(an.frequencyBinCount);
+  const src=actx.createMediaElementSource(fileEl);
+  recDest=actx.createMediaStreamDestination();
+  src.connect(an); src.connect(actx.destination); src.connect(recDest);
+  fileMode=true; audioOn=true; setDemo(false); showSrc('✔ Entrada: archivo '+f.name,'ok');
+  msg('Audio cargado: '+f.name+'. Pulsa ⏺ Grabar video: suena y graba hasta el final.');
+}
+$('bFile').onclick=()=>$('fileIn').click();
+$('fileIn').onchange=e=>e.target.files[0]&&loadFile(e.target.files[0]);
+function pickMime(){
+  for(const m of ['video/mp4;codecs=avc1.640033,mp4a.40.2','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm'])
+    if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+function toggleRec(){
+  if(rec){ rec.stop(); return; }
+  if(reel&&reelK===2){ reelK=1; resize(); msg('Grabar en vivo no hace 4K (pierde cuadros): grabo a 1080×1920. Para calidad máxima usa 🎬 Renderizar MP4 fluido. Para 4K usa 🎬 Renderizar MP4 fluido.'); }
+  grabando=true; qScale=1; resize();   // nunca grabar con la resolución adaptativa bajada
+  const vs=C.captureStream(0); recTrack=vs.getVideoTracks()[0]; const tracks=[recTrack];
+  if((fileMode||bridgeOn||sysOn)&&recDest) tracks.push(...recDest.stream.getAudioTracks());
+  else if(stream) tracks.push(...stream.getAudioTracks());
+  else { grabando=false; resize(); msg('Primero activa 🎙 Audio o carga un archivo con 📁.'); return; }
+  rec=new MediaRecorder(new MediaStream(tracks),{mimeType:pickMime(),videoBitsPerSecond:30e6,audioBitsPerSecond:192e3});
+  chunks=[]; rec.ondataavailable=e=>{ if(e.data.size)chunks.push(e.data); };
+  rec.onstop=()=>{
+    const ext=(rec.mimeType||'').includes('mp4')?'mp4':'webm';
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(chunks,{type:rec.mimeType}));
+    a.download='campos_reel_'+Date.now()+'.'+ext; a.click();
+    if(fileEl){ fileEl.pause(); fileEl.onended=null; }
+    rec=null; recTrack=null; grabando=false; resize(); $('bRec').classList.remove('on'); $('bRec').textContent='⏺ Grabar (REC)'; msg('Video guardado ('+ext+') en Descargas.');
+  };
+  rec.start(500);
+  $('bRec').classList.add('on'); $('bRec').textContent='⏹ Detener'; $('panel').classList.add('hide');
+  if(fileMode&&fileEl){ fileEl.currentTime=0; fileEl.play(); fileEl.onended=()=>rec&&rec.stop(); }
+}
+$('sRecK').onchange=e=>{ recK=+e.target.value; try{localStorage.setItem('cvRecK',recK);}catch(_){} };
+try{ const v=localStorage.getItem('cvRecK'); if(v){ recK=+v; $('sRecK').value=v; } }catch(_){}
+$('bRec').onclick=toggleRec;
+// Grabar SOLO el sonido en vivo y, al detener, renderizar el video offline (4K, 60 fps, sin cuadros perdidos): la calidad no depende del Mac en tiempo real
+let arec=null, achunks=[];
+$('bRecA').onclick=()=>{
+  if(arec){ arec.stop(); $('panel').classList.remove('hide'); return; }
+  const at=((fileMode||bridgeOn||sysOn)&&recDest)?recDest.stream.getAudioTracks():(stream?stream.getAudioTracks():[]);
+  if(!at.length){ msg('Primero activa 🎙 Audio o conecta el audio del computador.'); return; }
+  achunks=[]; arec=new MediaRecorder(new MediaStream(at),{audioBitsPerSecond:256e3});
+  arec.ondataavailable=e=>{ if(e.data.size)achunks.push(e.data); };
+  arec.onstop=()=>{ const tipo=arec.mimeType; arec=null; $('bRecA').classList.remove('on'); $('bRecA').classList.remove('on'); $('bRecA').textContent='🎬 Grabar y recrear en 4K (lento)';
+    fileObj=new Blob(achunks,{type:tipo}); msg('Sonido guardado. Renderizando el video…'); renderMP4(); };
+  arec.start(500); $('bRecA').classList.add('on'); $('bRecA').textContent='⏹ Detener y recrear en 4K'; $('panel').classList.add('hide'); msg('Grabando. Al detener se crea el video 4K con el audio (tarda unos minutos).');
+};
+function toggleReel(){   // vista vertical 9:16 (1080×1920). El tamaño del VIDEO final se elige en el menú junto a "Renderizar".
+  reel=!reel; reelK=1; qScale=1; $('bReel').classList.toggle('on',reel);
+  $('bReel').textContent=reel?'📱 Reel 9:16 (vista)':'📱 Formato Reel'; resize();
+}
+$('bReel').onclick=toggleReel;
+
+/* ============================ RENDER FLUIDO (fuera de tiempo real) ============================
+   Grabar en vivo pierde cuadros cuando el Mac no alcanza. Aquí NO hay tiempo real: se analiza el audio
+   del archivo con una FFT propia, se dibuja cada cuadro con dt fijo (1/fps), se codifica con WebCodecs
+   (H.264 + AAC) y se empaqueta en MP4. Salen TODOS los cuadros, a 60 fps, aunque tarde más que la canción. */
+const nextTick=()=>new Promise(r=>{ const c=new MessageChannel(); c.port1.onmessage=()=>r(); c.port2.postMessage(0); });
+function fft(re,im){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){ let bit=n>>1; for(;j&bit;bit>>=1) j^=bit; j^=bit; if(i<j){ let t=re[i];re[i]=re[j];re[j]=t; t=im[i];im[i]=im[j];im[j]=t; } }
+  for(let len=2;len<=n;len<<=1){
+    const ang=-2*Math.PI/len, wr=Math.cos(ang), wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){ let cr=1,ci=0;
+      for(let j=0;j<len/2;j++){
+        const a=i+j,b=a+len/2, xr=re[b]*cr-im[b]*ci, xi=re[b]*ci+im[b]*cr;
+        re[b]=re[a]-xr; im[b]=im[a]-xi; re[a]+=xr; im[a]+=xi;
+        const t=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=t;
+      }
+    }
+  }
+}
+let rendering=false, cancelRender=false;
+async function renderMP4(){
+  if(rendering){ cancelRender=true; return; }
+  if(!fileObj){ msg('Primero carga el audio con 📁 Cargar audio.'); return; }
+  if(!window.VideoEncoder||!window.AudioEncoder||!window.Mp4Muxer){ msg('Este navegador no soporta WebCodecs (usa Chrome).'); return; }
+  rendering=true; cancelRender=false; if(fileEl)fileEl.pause();
+  const previa={reel:reel,k:reelK}; enRender=true;
+  $('bRender').textContent='⏹ Cancelar render'; $('panel').classList.add('hide'); $('prog').style.display='block';
+  try{
+    const ac=actx||new (window.AudioContext||window.webkitAudioContext)();
+    const ab=await ac.decodeAudioData(await fileObj.arrayBuffer());
+    const sr=ab.sampleRate, nch=Math.min(2,ab.numberOfChannels), len=ab.length;
+    { let pk=0; for(let c=0;c<ab.numberOfChannels;c++){ const d=ab.getChannelData(c); for(let i=0;i<len;i++){ const v=Math.abs(d[i]); if(v>pk)pk=v; } }
+      const gn=pk>1e-4?Math.min(30,0.89/pk):1;                                    // normaliza a −1 dBFS: la mezcla del mixer llega baja (pico ≈ −23 dB)
+      if(gn>1.01) for(let c=0;c<ab.numberOfChannels;c++){ const d=ab.getChannelData(c); for(let i=0;i<len;i++)d[i]*=gn; } }
+    const mono=new Float32Array(len); for(let c=0;c<ab.numberOfChannels;c++){ const d=ab.getChannelData(c); for(let i=0;i<len;i++)mono[i]+=d[i]/ab.numberOfChannels; }
+    // formato: 4K 9:16 si Reel está activo, si no el tamaño actual
+    reel=true; reelK=($('sRender').value==='1080')?1:2; resize();      // el tamaño del video final sale del menú
+    // elige la mejor configuración que acepte el codificador
+    let cfg=null;
+    for(const fps of [60,30]) for(const codec of ['avc1.640034','avc1.640033','avc1.64002A']){
+      const c={codec,width:W,height:H,bitrate:(W*H>4e6?1:0.45)*(fps===60?50e6:34e6),framerate:fps};
+      if(!cfg&&(await VideoEncoder.isConfigSupported(c)).supported) cfg=c;
+    }
+    if(!cfg) throw new Error('El codificador no acepta '+W+'×'+H+'. Prueba Reel 1080p.');
+    const FPS=cfg.framerate;
+    const target=new Mp4Muxer.ArrayBufferTarget();
+    const muxer=new Mp4Muxer.Muxer({target,video:{codec:'avc',width:W,height:H},audio:{codec:'aac',numberOfChannels:nch,sampleRate:sr},fastStart:'in-memory'});
+    let encErr=null;
+    const venc=new VideoEncoder({output:(ch,meta)=>muxer.addVideoChunk(ch,meta),error:e=>encErr=e}); venc.configure(cfg);
+    const aenc=new AudioEncoder({output:(ch,meta)=>muxer.addAudioChunk(ch,meta),error:e=>encErr=e});
+    aenc.configure({codec:'mp4a.40.2',sampleRate:sr,numberOfChannels:nch,bitrate:192000});
+    // audio
+    for(let o=0;o<len;o+=4096){
+      const n=Math.min(4096,len-o), data=new Float32Array(n*nch);
+      for(let c=0;c<nch;c++) data.set(ab.getChannelData(c).subarray(o,o+n),c*n);
+      const ad=new AudioData({format:'f32-planar',sampleRate:sr,numberOfFrames:n,numberOfChannels:nch,timestamp:Math.round(o/sr*1e6),data});
+      aenc.encode(ad); ad.close();
+      if(aenc.encodeQueueSize>30) await nextTick();
+    }
+    // estado limpio y análisis propio
+    charges=[]; waves.length=0; T=0; nextId=0; lastSpawn[0]=lastSpawn[1]=lastSpawn[2]=-9;
+    pe.fill(0); fm.fill(0); fv.fill(1); lastHit.fill(-1e9); pk.fill(20); cont.fill(0); flash.fill(0);
+    setDemo(false); ink.init=false; glReset=true; g.fillStyle=bgColor(); g.fillRect(0,0,W,H);
+    det.h=[[],[],[]]; det.lmax=[-200,-200,-200]; det.last=[-1e9,-1e9,-1e9]; beat=0; hitPulse.fill(0);
+    const N=2048, re=new Float32Array(N), im=new Float32Array(N), win=new Float32Array(N);
+    for(let i=0;i<N;i++){ const a=2*Math.PI*i/N; win[i]=0.42-0.5*Math.cos(a)+0.08*Math.cos(2*a); }
+    fbuf=new Uint8Array(N/2);
+    const total=Math.ceil((len/sr+0.4)*FPS), dt=1/FPS, t0=performance.now();
+    for(let f=0;f<total;f++){
+      if(cancelRender||encErr) break;
+      const end=Math.floor(f*dt*sr)+256;       // un poco de adelanto: la imagen nace con el golpe, no después
+      for(let i=0;i<N;i++){ const ix=end-N+i; re[i]=(ix>=0&&ix<len?mono[ix]:0)*win[i]; im[i]=0; }
+      fft(re,im);
+      { const P=[0,0,0], bh=sr/N; for(let b=0;b<3;b++){ const i0=Math.max(1,Math.floor(BANDAS_HZ[b][0]/bh)), i1=Math.min(N/2-1,Math.floor(BANDAS_HZ[b][1]/bh)); let sm=0; for(let k=i0;k<=i1;k++){ const m=Math.hypot(re[k],im[k])/N; sm+=m*m; } P[b]=sm; } detectar(f*dt*1000,P); }
+      update(dt); draw();
+      const vf=new VideoFrame(C,{timestamp:Math.round(f*dt*1e6),duration:Math.round(dt*1e6)});
+      venc.encode(vf,{keyFrame:f%FPS===0}); vf.close();
+      if(f%6===0||venc.encodeQueueSize>6){
+        while(venc.encodeQueueSize>6) await nextTick();
+        const el=(performance.now()-t0)/1000, eta=el/(f+1)*(total-f-1);
+        $('prog').textContent='Renderizando '+W+'×'+H+' · '+FPS+' fps · '+Math.round(100*f/total)+'% · faltan ~'+Math.ceil(eta)+' s (deja esta ventana al frente)';
+        await nextTick();
+      }
+    }
+    if(cancelRender){ venc.close(); aenc.close(); msg('Render cancelado.'); }
+    else{
+      if(encErr) throw encErr;
+      await venc.flush(); await aenc.flush(); muxer.finalize();
+      const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([target.buffer],{type:'video/mp4'}));
+      a.download='campos_reel_'+W+'x'+H+'_'+FPS+'fps.mp4'; a.click();
+      msg('Listo: '+a.download+' ('+Math.round(target.buffer.byteLength/1e6)+' MB) en Descargas.');
+    }
+  }catch(e){ console.error(e); msg('Render: '+e.message); }
+  enRender=false; reel=previa.reel; reelK=previa.k; resize();      // la vista vuelve a su tamaño
+  rendering=false; $('bRender').textContent='🎬 Renderizar MP4 fluido (60 fps)'; $('prog').style.display='none'; $('panel').classList.remove('hide');
+}
+$('bRender').onclick=renderMP4;
+
+/* ============================ MIDI ============================ */
+let midiOn=false;
+function noteBand(n){
+  if([35,36,41,43,45].includes(n)) return 0;
+  if([37,38,39,40,47,48,50].includes(n)) return 1;
+  if([42,44,46,49,51,52,53,55,57,59].includes(n)) return 2;
+  return n<48?0:n<72?1:2;
+}
+async function startMidi(){
+  if(!navigator.requestMIDIAccess){ msg('Web MIDI no disponible (usa Chrome/Edge).'); return; }
+  try{
+    const acc=await navigator.requestMIDIAccess(); let cnt=0;
+    acc.inputs.forEach(inp=>{ cnt++; inp.onmidimessage=ev=>{
+      const [s,n,v]=ev.data; if((s&0xF0)===0x90&&v>0) hit(noteBand(n),v/127,(n%12+.5)/12);
+    }; });
+    midiOn=true; setDemo(false); $('bMidi').classList.add('on');
+    msg(cnt?('MIDI: '+cnt+' entrada(s).'):'MIDI activo, sin dispositivos conectados.');
+  }catch(e){ msg('MIDI: '+e.message); }
+}
+$('bMidi').onclick=startMidi;
+
+/* ============================ SERIAL (protocolo de video_synth) ============================ */
+let port=null,reader=null,serialOn=false,serBuf='',prevBtn=[0,0,0,0,0],piezoArmed=false;
+const BTN_BAND=[0,0,1,2,2];
+async function toggleSerial(){
+  if(serialOn){ await closeSerial(); return; }
+  if(!('serial' in navigator)){ msg('Web Serial no disponible (usa Chrome/Edge).'); return; }
+  try{
+    port=await navigator.serial.requestPort(); await port.open({baudRate:115200});
+    serialOn=true; setDemo(false); $('bSerial').classList.add('on'); msg('PercuSynth conectada por serial.'); readLoop();
+  }catch(e){ msg('Serial: '+e.message); }
+}
+async function closeSerial(){
+  serialOn=false;
+  try{ if(reader) await reader.cancel(); }catch(e){}
+  try{ if(port) await port.close(); }catch(e){}
+  port=null; $('bSerial').classList.remove('on'); msg('Serial cerrado.');
+}
+async function readLoop(){
+  const dec=new TextDecoder(); reader=port.readable.getReader();
+  try{
+    while(serialOn){
+      const {value,done}=await reader.read(); if(done)break;
+      serBuf+=dec.decode(value); let nl;
+      while((nl=serBuf.indexOf('\n'))>=0){
+        const line=serBuf.slice(0,nl).trim(); serBuf=serBuf.slice(nl+1);
+        if(line&&line[0]!=='=') parseSerial(line);
+      }
+    }
+  }catch(e){ console.warn('serial',e); } finally{ try{reader.releaseLock();}catch(e){} }
+}
+function parseSerial(line){
+  const v=line.split(',').map(Number); if(v.length<6||v.some(isNaN))return;
+  const nb=v.length>=11?5:4, piezo=v.length>=11?v[9]:v[8];
+  for(let i=0;i<nb;i++){ const b=v[4+i]?1:0; if(b&&!prevBtn[i]) hit(BTN_BAND[i],.8); prevBtn[i]=b; }
+  const r=clamp(piezo/4095,0,1);
+  if(r>.06&&!piezoArmed){ piezoArmed=true; hit(1,clamp(r*2.2,.35,1)); } else if(r<.03) piezoArmed=false;
+}
+$('bSerial').onclick=toggleSerial;
+// si ya diste permiso a la placa antes, se reconecta sola al abrir la página
+if('serial' in navigator) navigator.serial.getPorts().then(async ps=>{
+  if(!ps.length||serialOn)return;
+  try{ port=ps[0]; await port.open({baudRate:115200}); serialOn=true; setDemo(false);
+    $('bSerial').classList.add('on'); msg('PercuSynth reconectada por serial.'); readLoop(); }catch(e){ port=null; }
+});
+
+/* ============================ interfaz ============================ */
+function showSrc(label,kind){ const e=$('src'); e.textContent=label; e.className=kind||''; }
+function msg(t){ $('msg').textContent=t; }
+$('bPal').onclick=togglePal;
+function showMode(){ $('sMode').value=String(mode); }
+function setMode(m){ qScale=1; resize(); mode=((m%MODES.length)+MODES.length)%MODES.length; showMode(); g.fillStyle=bgColor(); g.fillRect(0,0,W,H); if(mode===5)glReset=true; }
+function toggleMode(){ setMode(mode+1); }
+MODES.forEach((n,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=(i+1)+' · '+n; $('sMode').appendChild(o); });
+$('sMode').onchange=e=>setMode(+e.target.value); showMode();
+try{ const g_=localStorage.getItem('cvCal'); if(g_&&['alta','max','auto'].includes(g_)) calidad=g_; }catch(e){}
+$('sCal').value=calidad;
+$('sCal').onchange=e=>{ calidad=e.target.value; qScale=1; try{localStorage.setItem('cvCal',calidad);}catch(_){} resize(); };
+$('bMirror').onclick=toggleMirror; $('bCycle').onclick=toggleCycle;
+function toggleMirror(){ mirror=(mirror+1)%3; $('bMirror').textContent='🪞 Espejo: '+['no','2 lados','4 lados'][mirror]; }
+function toggleCycle(){ cycleOn=!cycleOn; if(!cycleOn) for(let i=0;i<PAL.length;i++)PAL[i]=PAL0[i]; $('bCycle').textContent='🌈 Ciclo color: '+(cycleOn?'sí':'no'); }
+function togglePal(){ set.rainbow=!set.rainbow; $('bPal').textContent=set.rainbow?'🎨 Arcoíris':'🎨 Por punto'; }
+function fullscreen(){ document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen(); }
+$('bFull').onclick=fullscreen;
+C.addEventListener('click',e=>{ const r=C.getBoundingClientRect(); hit(1,.8,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height); });
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT')return;
+  const k=e.key.toLowerCase();
+  if(k==='z')hit(0,.9); else if(k==='x')hit(1,.8); else if(k==='c')hit(2,.7);
+  else if(k===' '){ e.preventDefault(); hit(Math.floor(Math.random()*3),rnd(.4,1)); }
+  else if(k==='h')$('panel').classList.toggle('hide');
+  else if(/^[1-9]$/.test(k)) setMode(+k-1);
+  else if(k==='v')toggleMode(); else if(k==='k')toggleMirror(); else if(k==='r')toggleCycle(); else if(k==='f')fullscreen(); else if(k==='p')togglePal(); else if(k==='d')setDemo(!demoOn);
+  else if(k==='a')$('bAudio').click(); else if(k==='m')startMidi(); else if(k==='s')toggleSerial();
+});
+// el panel se oculta solo con el ratón quieto (proyección limpia)
+let lastMove=performance.now(), hideT=null;
+addEventListener('mousemove',()=>{
+  lastMove=performance.now(); $('panel').classList.remove('hide'); document.body.style.cursor='';
+  clearTimeout(hideT); hideT=setTimeout(()=>{ $('panel').classList.add('hide'); document.body.style.cursor='none'; },5000);
+});
+
+/* arranque: unos puntos ya vivos para que no empiece vacío */
+resize();
+[0,1,2,1,0].forEach((b,i)=>setTimeout(()=>hit(b,.7),i*350));
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
