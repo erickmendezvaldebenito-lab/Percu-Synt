@@ -130,7 +130,7 @@ const float PI2    = 6.28318530718f;
 // ==============================================================================================================================================
 // SONIDO — lo fijo se ajusta acá
 // ==============================================================================================================================================
-const float MASTER = 0.70f;               // ganancia general con POT1 al máximo
+const float MASTER = 0.80f;               // ganancia general con POT1 al máximo
 const float BPM_MIN = 108.0f, BPM_MAX = 124.0f;   // el tempo se sortea en cada escena (deep / dub techno)
 
 // Capas: 0 dron · 1 pad · 2 textura · 3 pulso · 4 arpegio · 5 hats · 6 bombo · 7 sinte
@@ -138,10 +138,15 @@ enum { C_DRON, C_PAD, C_TEXT, C_PULSO, C_ARP, C_HATS, C_BOMBO, C_SINTE, N_CAPAS 
 // El POT3 enciende cada capa con una rampa suave entre T0 y T1. (dron y sinte no dependen del POT3)
 const float CAP_T0[N_CAPAS]  = { -1.0f, 0.06f, 0.20f, 0.34f, 0.50f, 0.64f, 0.80f, -1.0f };
 const float CAP_T1[N_CAPAS]  = {  0.0f, 0.16f, 0.30f, 0.44f, 0.60f, 0.74f, 0.90f,  0.0f };
-const float NIV_CAP[N_CAPAS] = {  0.34f, 0.55f, 0.55f, 0.75f, 0.70f, 0.45f, 0.80f, 0.70f };   // nivel de cada capa
-const float SEND_D[N_CAPAS]  = {  0.00f, 0.08f, 0.00f, 0.70f, 0.40f, 0.14f, 0.00f, 0.45f };   // envío al delay
-const float SEND_R[N_CAPAS]  = {  0.04f, 0.30f, 0.30f, 0.30f, 0.28f, 0.10f, 0.00f, 0.45f };   // envío a la reverb
-const float SC_CAP[N_CAPAS]  = {  0.25f, 0.35f, 0.20f, 0.30f, 0.15f, 0.00f, 0.00f, 0.10f };   // cuánto agacha el bombo
+#ifdef SIMULADOR
+#define CSIM                                  // el simulador de PC necesita silenciar capas para medirlas de a una
+#else
+#define CSIM const
+#endif
+CSIM float NIV_CAP[N_CAPAS] = {  0.23f, 0.80f, 0.52f, 0.80f, 0.80f, 0.55f, 0.42f, 0.70f };   // nivel de cada capa (el dron, el más bajo: antes era un sub al máximo)
+const float SEND_D[N_CAPAS]  = {  0.00f, 0.06f, 0.00f, 0.45f, 0.30f, 0.10f, 0.00f, 0.30f };   // envío al delay
+const float SEND_R[N_CAPAS]  = {  0.02f, 0.20f, 0.18f, 0.20f, 0.20f, 0.08f, 0.00f, 0.30f };   // envío a la reverb
+const float SC_CAP[N_CAPAS]  = {  0.45f, 0.35f, 0.25f, 0.30f, 0.15f, 0.00f, 0.00f, 0.10f };   // cuánto agacha el bombo
 const bool  CAP_GATE[N_CAPAS]= { false, true, false, true, true, true, true, true };           // las pausas la callan
 
 // ==============================================================================================================================================
@@ -219,7 +224,7 @@ uint16_t pausaMask[4];                          // por compás de la frase: bit 
 // ─── Armonía en curso ───
 int      acorde = 0;                            // grado raíz del acorde
 int      cuentaAcorde = 0;
-float    brillo = 900.0f;                       // corte objetivo del pad (Hz)
+float    brillo = 700.0f;                       // corte objetivo del pad (Hz)
 float    padCents = 5.0f;
 
 // ─── Utilidades de sonido ───
@@ -291,7 +296,7 @@ inline void envDisparo(Env &e) { e.atk = true; e.rapido = false; }   // parte de
 inline bool envViva(const Env &e) { return e.v > 0.0f || e.atk; }
 
 // Constantes de tiempo (se llenan en prepararSintesis)
-float kGan, kRunUp, kRunDn, kVol, kPadGlideB, kPadGainB, kPadBB, kGateAb, kGateCe, kDuckAt, kDuckRl, kPan, kW;
+float kPadDip, kPadRet, kGan, kRunUp, kRunDn, kVol, kPadGlideB, kPadGainB, kPadBB, kGateAb, kGateCe, kDuckAt, kDuckRl, kPan, kW;
 float kPanB, kSnGl, kAtPluck, kAtStab, kAtSonar, kAtBell, kAtCoro;
 float decPluck, decPluckF, decStab, decStabF, decHat, decHatAb, decSonar, decSonar2, decBell, decBellI, decCoro;
 float kKickA, kKickA2, kKickM, kKickP;
@@ -305,8 +310,9 @@ float dronF0 = 41.2f, dronPh[3] = { 0, 0.13f, 0.57f }, dronMuta = 0.0f;
 float padFT[4] = { 130, 196, 155, 233 }, padFC[4] = { 130, 196, 155, 233 }, padG[4], padGT[4];
 float padPh[4][2], padGL[4][2], padGR[4][2];
 Svf   padSvfL, padSvfR; SvfC padC;
-float padCut = 900.0f, padHpL = 0, padHpR = 0;
-float padDtA[4], padDtB[4], padGd[4], padBc = 1.0f, padBd = 0.0f; bool padDoble = true;   // padDoble: 2 sierras por nota (el regulador de carga lo apaga)
+float padCut = 700.0f, padHpL = 0, padHpR = 0;
+float padDtA[4], padDtB[4], padGe[4], padGeD[4], padFad[4] = { 1, 1, 1, 1 }, padBc = 1.0f, padBd = 0.0f; uint8_t padSt[4]; bool padDoble = true;   // padFad/padSt: al cambiar de acorde la voz baja, salta y vuelve (sin glissando)
+float stabHp = 0, arpHp = 0, snHp = 0;               // pasa-altos de carril de cada capa melódica   // padDoble: 2 sierras por nota (el regulador de carga lo apaga)
 // ─── TEXTURA: ruido por dos resonadores afinados a notas de la escala ───
 float texFT[2] = { 700, 1100 }, texFC[2] = { 700, 1100 };
 Svf   texSvf[2]; SvfC texC[2];
@@ -327,7 +333,7 @@ Env   snE, snE2, snEI; uint32_t snHold = 0; Svf snF1, snF2; SvfC snC1, snC2;
 int16_t dlyBufL[DELAY_MAX], dlyBufR[DELAY_MAX];
 int     dlyW = 0, dlyTA = 6000, dlyTB = 6000; float dlyXf = 0.0f; bool dlyCruce = false;
 float   dlyLpL = 0, dlyLpR = 0, dlyEn = 0, dlyEnT = 0, kDlyLp, kDlyXf;
-const float DLY_FB = 0.50f, DLY_MIX = 0.50f, REV_MIX = 0.34f;
+const float DLY_FB = 0.50f, DLY_MIX = 0.42f, REV_MIX = 0.26f;
 const int   DLY_PASOS[4] = { 0, 3, 4, 2 };        // corchea con puntillo · negra · corchea
 
 #define RV_N 4
@@ -365,17 +371,56 @@ int degDisponible(int d) {
 }
 int gradoAzar() { return ORDEN[sorteoS() % (uint32_t)nNotas]; }     // un grado cualquiera de los que ya existen
 
-void actualizarAcorde() {                                           // pad, textura → al acorde en curso
-  const int pb = baseMidi() + 24;
-  for (int k = 0; k < 4; k++) padFT[k] = hz((float)(pb + semiGrado(acorde + 2 * k)));
-  padGT[0] = 1.0f; padGT[1] = 1.0f;
-  padGT[2] = nNotas >= 3 ? 1.0f : 0.0f;                             // la tercera entra con la 3.ª nota
-  padGT[3] = nNotas >= 4 ? 1.0f : 0.0f;                             // la séptima con la 4.ª
+// ─── ARMONÍA CONJUNTA ───────────────────────────────────────────────────────────────────────────────────────
+// Lo que ya suena (la tónica del dron y las notas del acorde) es contra lo que se mide todo lo demás: una 2.ª menor,
+// 7.ª mayor o 9.ª menor entre dos capas es lo que se oye como "chocan", y ninguna capa melódica puede caer ahí.
+int  acMidi[4];                                                     // notas del acorde en el registro del pad: raíz · QUINTA · tercera · séptima
+bool acOk[4];                                                       // false = esa nota chocaría con la tónica del dron: no suena
+int  anclas[6], nAnclas = 0;
+int  arpMidi = -100, snMidi = -100;                                 // la nota que el arpegio / el sinte tienen sonando (las demás capas también se miden contra ella)
+inline bool semitonoChoque(int a, int b) { int d = (a > b ? a - b : b - a) % 12; return d == 1 || d == 11; }
+bool choca(int midi) {
+  for (int i = 0; i < nAnclas; i++) if (semitonoChoque(midi, anclas[i])) return true;
+  if (arpE.v > 0.10f && semitonoChoque(midi, arpMidi)) return true;
+  if ((snE.v > 0.10f || snE2.v > 0.10f) && semitonoChoque(midi, snMidi)) return true;
+  return false;
 }
-void elegirTextura() {
-  texFT[0] = hz((float)(baseMidi() + 36 + semiGrado(gradoAzar())));
-  texFT[1] = hz((float)(baseMidi() + 48 + semiGrado(gradoAzar())));
-  for (int i = 0; i < 2; i++) if (texFT[i] > 2300.0f) texFT[i] *= 0.5f;
+// La nota de la escala más cercana a `deg` (entre las que ya existen) que NO choca con lo que suena. oct0 = la tónica en el registro de la capa.
+int notaLibre(int deg, int oct0, int tope) {
+  const int d0 = degDisponible(deg);
+  for (int k = 0; k < 7; k++) for (int sg = 0; sg < 2; sg++) {
+    if (k == 0 && sg == 1) continue;
+    const int d = sg ? d0 - k : d0 + k;
+    if (d < 0 || d > 6 || rango[d] >= nNotas) continue;
+    int m = oct0 + MODO[modo][d]; while (m > tope) m -= 12;
+    if (!choca(m)) return m;
+  }
+  int m = oct0 + (semiGrado(acorde) % 12); while (m > tope) m -= 12;   // ninguna sirvió: la raíz del acorde
+  return m;
+}
+void elegirTextura() {                                              // dos resonadores afinados a notas DEL ACORDE (nunca a una nota suelta de la escala)
+  int cand[3], n = 0;
+  for (int k = 0; k < 3; k++) if (acOk[k] && (k < 2 || nNotas >= 3)) cand[n++] = k;
+  const int a = cand[sorteoS() % (uint32_t)n], b = cand[sorteoS() % (uint32_t)n];
+  float ma = (float)(acMidi[a] + 12), mb = (float)(acMidi[b] + 24);
+  while (hz(ma) > 1800.0f) ma -= 12.0f;
+  while (hz(mb) > 1800.0f) mb -= 12.0f;
+  texFT[0] = texFC[0] = hz(ma); texFT[1] = texFC[1] = hz(mb);        // los resonadores se re-afinan de golpe: excitados por ruido y con Q bajo, no hay escalón
+}
+void actualizarAcorde() {                                           // pad y textura → al acorde en curso
+  const int pb = baseMidi() + 24, ton = baseMidi();
+  const int dg[4] = { 0, 4, 2, 6 };                                 // raíz · QUINTA · tercera · séptima: el orden en que entran con el POT3
+  nAnclas = 0; anclas[nAnclas++] = ton;
+  for (int k = 0; k < 4; k++) {
+    const int m = pb + semiGrado(acorde + dg[k]);
+    acMidi[k] = m; padFT[k] = hz((float)m);
+    acOk[k] = (k == 0) || (!semitonoChoque(m, ton) && !(k == 3 && semitonoChoque(m, acMidi[0])));   // una séptima MAYOR sobre la raíz (acorde maj7) también choca: se descarta
+    if (acOk[k] && (k < 2 || (k == 2 && nNotas >= 3) || (k == 3 && nNotas >= 4))) anclas[nAnclas++] = m;
+  }
+  padGT[0] = 1.0f; padGT[1] = acOk[1] ? 1.0f : 0.0f;
+  padGT[2] = (nNotas >= 3 && acOk[2]) ? 1.0f : 0.0f;                // la tercera entra con la 3.ª nota
+  padGT[3] = (nNotas >= 4 && acOk[3]) ? 1.0f : 0.0f;                // la séptima con la 4.ª
+  elegirTextura();
 }
 bool acordeValido() { return acorde == 0 || rango[acorde] < nNotas; }
 
@@ -384,7 +429,8 @@ void siguienteAcorde() {
   int cand[6], n = 0;
   for (int i = 0; i < 6; i++) {
     int r = ACORDES[modo][i];
-    if (r != acorde && r != 0 && rango[r] < nNotas) cand[n++] = r;  // sólo raíces que ya existen y con tríada consonante
+    const int c = semiGrado(r) % 12;                                 // una raíz a 2.ª menor / 7.ª mayor de la tónica del dron chocaría (el II del frigio)
+    if (r != acorde && r != 0 && rango[r] < nNotas && c != 1 && c != 11) cand[n++] = r;   // sólo raíces que ya existen y con tríada consonante
   }
   if (n == 0) { acorde = 0; return; }
   acorde = cand[sorteoS() % (uint32_t)n];
@@ -431,13 +477,12 @@ void construirEscena() {
 
 void reiniciarMusica() {
   paso = 0; compas = 0; compasFrase = 0; cuentaAcorde = 0; acorde = 0; faltan = 0.0f;
-  brillo = 900.0f; padCents = 5.0f;
+  brillo = 700.0f; padCents = 5.0f;
   dronF0 = hz((float)baseMidi());
   kickF = hz((float)baseMidi());                                    // bombo afinado a la tónica (41–78 Hz): por debajo de 40 Hz un parlante chico no lo reproduce
   nNotas = etapa + 2;
   actualizarAcorde(); elegirTextura();
-  for (int k = 0; k < 4; k++) { padFC[k] = padFT[k]; }
-  texFC[0] = texFT[0]; texFC[1] = texFT[1];
+  for (int k = 0; k < 4; k++) { padFC[k] = padFT[k]; padFad[k] = 1.0f; padSt[k] = 0; }
 }
 
 void aplicarDelay() {                                               // el tiempo del eco sigue al tempo (cruce entre dos cabezas)
@@ -494,47 +539,47 @@ void dispararHat(int acento) {
   hatPan = hatPan > 0 ? -0.35f : 0.35f; panG(hatPan, hatGL, hatGR); flash(4);
 }
 void dispararStab() {
-  const int pb = baseMidi() + 24;
-  stabF[0] = hz((float)(pb + semiGrado(acorde)));
-  stabF[1] = hz((float)(pb + semiGrado(acorde + 2)));
-  stabF[2] = hz((float)(pb + semiGrado(acorde + 4)));
-  if (nNotas < 3) stabF[1] = stabF[0] * 2.0f;                        // sin tercera: octava (acorde de quintas)
+  const int m0 = acMidi[0] + 12;                                     // un acorde de dub UNA octava sobre el pad (no lo dobla): raíz · quinta · tercera
+  int m1 = (acOk[1] ? acMidi[1] : acMidi[0]) + 12;
+  int m2 = (nNotas >= 3 && acOk[2]) ? acMidi[2] + 12 : acMidi[0] + 24;
+  int mm[3] = { m0, m1, m2 };
+  for (int i = 0; i < 3; i++) { while (mm[i] > 79) mm[i] -= 12; stabF[i] = hz((float)mm[i]); }
   envDisparo(stabE); stabFE = 1.0f; flash(2);
 #ifdef SIMULADOR
-  for (int i = 0; i < 3; i++) simNota(C_PULSO, (int)(69.0f + 12.0f * log2f(stabF[i] / 440.0f) + 0.5f));
+  for (int i = 0; i < 3; i++) simNota(C_PULSO, mm[i]);
 #endif
 }
 void dispararArp(int i) {
-  int d = degDisponible(arpDeg[i]);
-  float m = (float)(baseMidi() + (arpOct[i] ? 36 : 24) + MODO[modo][d]);
-  arpF = hz(m); arpPanT = arpPanT > 0 ? -0.4f : 0.4f;
+  const int m = notaLibre(arpDeg[i], baseMidi() + (arpOct[i] ? 48 : 36), 84);   // el arpegio vive más arriba que el pad y el pulso
+  arpMidi = m; arpF = hz((float)m); arpPanT = arpPanT > 0 ? -0.4f : 0.4f;
   envDisparo(arpE); arpFE = 1.0f; flash(3);
 #ifdef SIMULADOR
-  simNota(C_ARP, (int)m);
+  simNota(C_ARP, m);
 #endif
 }
 void dispararSinte(int i, float muta) {
-  int d = degDisponible(sinteDeg[i]);
   snPanT = ruido() * 0.5f;
+  int m;
   if (muta < 0.34f) {                                                // SONAR: seno profundo con eco
-    snTipo = 0; snHold = 0; float m = (float)(baseMidi() + 24 + MODO[modo][d]); snF = hz(m); envDisparo(snE); envDisparo(snE2);
-#ifdef SIMULADOR
-    simNota(C_SINTE, (int)m);
-#endif
+    m = notaLibre(sinteDeg[i], baseMidi() + 36, 84);
+    snTipo = 0; snHold = 0; snF = hz((float)m); envDisparo(snE); envDisparo(snE2);
   } else if (muta < 0.67f) {                                         // CAMPANA: FM de cristal (modulador 3.5, siempre > 2)
-    snTipo = 1; snHold = 0; float m = (float)(baseMidi() + 36 + MODO[modo][d]); snF = hz(m); envDisparo(snE); snEI.v = 1.0f; snEI.atk = false; snEI.rapido = false;
-#ifdef SIMULADOR
-    simNota(C_SINTE, (int)m);
-#endif
+    m = notaLibre(sinteDeg[i], baseMidi() + 48, 84);
+    snTipo = 1; snHold = 0; snF = hz((float)m); envDisparo(snE); snEI.v = 1.0f; snEI.atk = false; snEI.rapido = false;
   } else {                                                           // CORO: voz de formantes, nota larga y ligada
-    snTipo = 2; float m = (float)(baseMidi() + 24 + MODO[modo][d]); snFT = hz(m);
-    if (!envViva(snE)) snF = snFT;
+    m = notaLibre(sinteDeg[i], baseMidi() + 36, 79);
+    snTipo = 2; snFT = hz((float)m); snF = snFT;                  // el coro SALTA de nota (un deslizamiento pasa por afinaciones que no son de ninguna nota)
     snHold = (uint32_t)(sps * 10.0f); snE.rapido = false;
-#ifdef SIMULADOR
-    simNota(C_SINTE, (int)m);
-#endif
   }
+  snMidi = m;
+#ifdef SIMULADOR
+  simNota(C_SINTE, m);
+#endif
   flash(3);
+}
+void soltarNotas() {                                                // al cambiar de acorde, lo que sonaba del acorde anterior se apaga (cola de 1.5 ms: sin escalón)
+  stabE.atk = false; stabE.rapido = true; arpE.atk = false; arpE.rapido = true;
+  snE.atk = false; snE.rapido = true; snE2.atk = false; snE2.rapido = true; snHold = 0;
 }
 
 bool pausaCerrada(int s, int cf) {
@@ -550,16 +595,16 @@ bool pausaCerrada(int s, int cf) {
 void eventoCompas(float muta) {
   if (muta >= 0.08f) {                                               // 0 = quieto
     int cada = muta < 0.30f ? 8 : muta < 0.60f ? 4 : muta < 0.85f ? 2 : 1;
-    if (++cuentaAcorde >= cada) { cuentaAcorde = 0; siguienteAcorde(); actualizarAcorde(); }
+    if (++cuentaAcorde >= cada) { cuentaAcorde = 0; const int antes = acorde; siguienteAcorde(); if (acorde != antes) soltarNotas(); actualizarAcorde(); }
     brillo += (azarS() - 0.5f) * 2.0f * muta * 900.0f;               // el pad abre y cierra
-    if (brillo < 550.0f) brillo = 550.0f; if (brillo > 3200.0f) brillo = 3200.0f;
+    if (brillo < 450.0f) brillo = 450.0f; if (brillo > 2200.0f) brillo = 2200.0f;
     if (azarS() < muta * 0.8f) elegirTextura();
     int k = (int)(muta * 5.0f + 0.5f);                               // el arpegio se reescribe
     for (int j = 0; j < k; j++) {
       int i = (int)(sorteoS() % 32); arpDeg[i] = (uint8_t)(sorteoS() % 7); arpOct[i] = (uint8_t)(sorteoS() & 1);
       if (azarS() < 0.4f) arpAct[i] = !arpAct[i];
     }
-  } else { brillo += (900.0f - brillo) * 0.5f; }
+  } else { brillo += (700.0f - brillo) * 0.5f; }
   padCents = 5.0f + 10.0f * muta;
   dronMuta = muta;
   flash(1);
@@ -569,7 +614,7 @@ void eventoPaso(float muta) {
   if (paso == 0) eventoCompas(muta);
   if ((uint8_t)etapa != pEtapa) {                                     // el POT3 cambió de zona: entra / sale una nota de la escala
     etapa = pEtapa; nNotas = etapa + 2;
-    if (!acordeValido()) acorde = 0;
+    if (!acordeValido()) { acorde = 0; soltarNotas(); }
     actualizarAcorde();
   }
   compasFrase = compas & 3;
@@ -606,6 +651,7 @@ void prepararSintesis() {
   for (int i = 0; i <= 2048; i++) { sinTab[i] = sinf(PI2 * (float)i / 2048.0f); subTab[i] = sinTab[i] + 0.30f * sinf(2.0f * PI2 * (float)i / 2048.0f); }
   kEnvRap = decTau(0.0015f);
   kGan = kTau(0.06f); kRunUp = kTau(0.5f); kRunDn = kTau(0.25f); kVol = kTau(0.03f);
+  kPadDip = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 0.035f); kPadRet = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 0.45f);
   kPadGlideB = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 1.3f); kPadGainB = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 0.9f); kPadBB = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 0.5f);
   kGateAb = kTau(0.012f); kGateCe = kTau(0.004f);
   kDuckAt = kTau(0.001f); kDuckRl = kTau(0.14f); kPan = kTau(0.02f); kPanB = 1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 0.02f); kW = kTau(0.025f);
@@ -659,14 +705,14 @@ void renderBuffer() {
     gT[c] = g; pubGan[c] = gC[c] * run;
   }
   padCut += (brillo - padCut) * (1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 2.0f));
-  padC = svfCoef(padCut, 0.9f);
-  for (int i = 0; i < 2; i++) { texFC[i] += (texFT[i] - texFC[i]) * (1.0f - expf(-(float)BUFFER_SAMPLES * INV_SR / 1.0f)); texC[i] = svfCoef(texFC[i], 8.0f); }
+  padC = svfCoef(padCut, 0.8f);
+  for (int i = 0; i < 2; i++) texC[i] = svfCoef(texFC[i], 6.0f);
   { float q; float fc = fcFiltro(corte, filtroM ? filtroM : 1, q); SvfC t = svfCoef(fc, q);
     mfD.a1 = (t.a1 - mfC.a1) / (float)BUFFER_SAMPLES; mfD.a2 = (t.a2 - mfC.a2) / (float)BUFFER_SAMPLES;
     mfD.a3 = (t.a3 - mfC.a3) / (float)BUFFER_SAMPLES; mfD.k = (t.k - mfC.k) / (float)BUFFER_SAMPLES; }
   wLpT = filtroM == 1; wHpT = filtroM == 2; wBpT = filtroM == 3;
   const bool jug = jugando;
-  const float dronDet = 1.0f + 0.0018f * dronMuta, dronDet2 = 1.0f - 0.0007f * dronMuta;
+  const float dronDetR = 1.0f + 0.0006f + 0.0012f * dronMuta, dronDetL = 1.0f - 0.0006f - 0.0005f * dronMuta;   // la octava, desafinada distinto en L y R: ensancha y respira
   const float da = 1.0f + padCents * 0.000578f, db = 1.0f - padCents * 0.000578f;     // cents → razón (≈ ln2/1200)
   float agl = arpGL, agr = arpGR, sgl = snGL, sgr = snGR, ngl, ngr, adl, adr, sdl, sdr;
   arpPan += (arpPanT - arpPan) * kPanB; panG(arpPan, ngl, ngr); adl = (ngl - agl) * (1.0f / (float)BUFFER_SAMPLES); adr = (ngr - agr) * (1.0f / (float)BUFFER_SAMPLES); const float aEL = ngl, aER = ngr;
@@ -674,9 +720,13 @@ void renderBuffer() {
   // PAD: el deslizamiento entre acordes y las ganancias se actualizan POR BLOQUE (la frecuencia cambia ~0.2 % de lo que falta por bloque: inaudible)
   // y las ganancias llegan con una rampa lineal por muestra. Así no hay cuentas de suavizado dentro del bucle de las 8 sierras.
   for (int k = 0; k < 4; k++) {
-    padFC[k] += (padFT[k] - padFC[k]) * kPadGlideB;
+    // al cambiar de nota la voz BAJA, SALTA y VUELVE a subir: un glissando de 1 s pasaba por notas que no son de ningún acorde (y chocaba)
+    if (padSt[k] == 0 && fabsf(padFT[k] - padFC[k]) > 0.01f) padSt[k] = 1;
+    if (padSt[k] == 1) { padFad[k] += (0.0f - padFad[k]) * kPadDip; if (padFad[k] < 0.01f) { padFC[k] = padFT[k]; padSt[k] = 2; } }
+    else if (padSt[k] == 2) { padFad[k] += (1.0f - padFad[k]) * kPadRet; if (padFad[k] > 0.97f) { padFad[k] = 1.0f; padSt[k] = 0; } }
     padDtA[k] = padFC[k] * da * INV_SR; padDtB[k] = padFC[k] * db * INV_SR;
-    const float g1 = padG[k] + (padGT[k] - padG[k]) * kPadGainB; padGd[k] = (g1 - padG[k]) * (1.0f / (float)BUFFER_SAMPLES);
+    padG[k] += (padGT[k] - padG[k]) * (padGT[k] > padG[k] ? kPadGainB : kPadDip);   // sube despacio, BAJA rápido: una nota que choca no puede seguir sonando 1 s
+    padGeD[k] = (padG[k] * padFad[k] - padGe[k]) * (1.0f / (float)BUFFER_SAMPLES);       // rampa lineal de la ganancia efectiva dentro del bloque
   }
   { const float b1 = padBc + ((padDoble ? 1.0f : 0.0f) - padBc) * kPadBB; padBd = (b1 - padBc) * (1.0f / (float)BUFFER_SAMPLES); }
 
@@ -697,14 +747,17 @@ void renderBuffer() {
     float sdL = 0, sdR = 0, srL = 0, srR = 0;   // envíos al delay / a la reverb
 #define MEZCLA(c, xl, xr) { dL += (xl); dR += (xr); sdL += (xl) * SEND_D[c]; sdR += (xr) * SEND_D[c]; srL += (xl) * SEND_R[c]; srR += (xr) * SEND_R[c]; }
 
-    // ── DRON ──
+    // ── DRON ── la tónica (sub + 2.º armónico) y su octava en triángulo. SIN quinta fija: chocaba con cualquier acorde que trajera una
+    // sexta menor. Y el bombo se queda con el grave: cuando entra, el sub del dron cede (el "bajo pegado a full" era esto, siempre al máximo).
     { const float g = gC[C_DRON] * run * (1.0f - SC_CAP[C_DRON] * duck) * NIV_CAP[C_DRON];
       if (g > 0.0001f) {
-        for (int k = 0; k < 3; k++) { dronPh[k] += dronF0 * INV_SR * (k == 0 ? 1.0f : k == 1 ? 1.4983071f : 2.0f * dronDet); if (dronPh[k] >= 1.0f) dronPh[k] -= 1.0f; }
-        float sub = tabT(subTab, dronPh[0]);                                     // sub + su 2.º armónico: pesa en los parlantes chicos
-        float qui = sinT(dronPh[1]) * 0.30f, oct = sinT(dronPh[2]) * 0.20f * dronDet2;
-        float l = g * (sub * 0.7071f + qui * 0.85f + oct * 0.5f), r = g * (sub * 0.7071f + qui * 0.5f + oct * 0.85f);
-        MEZCLA(C_DRON, l, r);
+        dronPh[0] += dronF0 * INV_SR; if (dronPh[0] >= 1.0f) dronPh[0] -= 1.0f;
+        dronPh[1] += dronF0 * 2.0f * dronDetL * INV_SR; if (dronPh[1] >= 1.0f) dronPh[1] -= 1.0f;
+        dronPh[2] += dronF0 * 2.0f * dronDetR * INV_SR; if (dronPh[2] >= 1.0f) dronPh[2] -= 1.0f;
+        const float sub = tabT(subTab, dronPh[0]) * (1.0f - 0.75f * gC[C_BOMBO]) * 0.7071f;
+        const float tl = (dronPh[1] < 0.5f ? 4.0f * dronPh[1] - 1.0f : 3.0f - 4.0f * dronPh[1]) * 0.40f;
+        const float tr = (dronPh[2] < 0.5f ? 4.0f * dronPh[2] - 1.0f : 3.0f - 4.0f * dronPh[2]) * 0.40f;
+        MEZCLA(C_DRON, g * (sub + tl), g * (sub + tr));
       } }
 
     // ── PAD ──
@@ -712,13 +765,13 @@ void renderBuffer() {
       if (g > 0.0001f) {
         float pl = 0, pr = 0; padBc += padBd;
         for (int k = 0; k < 4; k++) {
-          padG[k] += padGd[k];
-          if (padG[k] < 0.0005f) continue;
+          padGe[k] += padGeD[k];
+          if (padGe[k] < 0.0005f) continue;
           float p = padPh[k][0] + padDtA[k]; if (p >= 1.0f) p -= 1.0f; padPh[k][0] = p;
           const float sa = (2.0f * p - 1.0f) - polyBlep(p, padDtA[k]);
           float sb = 0.0f;
-          if (k < 2 && padBc > 0.002f) { float q = padPh[k][1] + padDtB[k]; if (q >= 1.0f) q -= 1.0f; padPh[k][1] = q; sb = ((2.0f * q - 1.0f) - polyBlep(q, padDtB[k])) * padBc; }
-          pl += padG[k] * (sa * padGL[k][0] + sb * padGL[k][1]); pr += padG[k] * (sa * padGR[k][0] + sb * padGR[k][1]);
+          if (k < 2 && padBc > 0.002f) { float q = padPh[k][1] + padDtB[k]; if (q >= 1.0f) q -= 1.0f; padPh[k][1] = q; sb = (q < 0.5f ? 4.0f * q - 1.0f : 3.0f - 4.0f * q) * padBc; }   // 2.ª voz TRIÁNGULO desafinado: más suave que otra sierra y sin PolyBLEP
+          pl += padGe[k] * (sa * padGL[k][0] + sb * padGL[k][1]); pr += padGe[k] * (sa * padGR[k][0] + sb * padGR[k][1]);
         }
         float a, b, c2, l, r;
         svf(padSvfL, padC, pl * 0.16f, l, a, b); svf(padSvfR, padC, pr * 0.16f, r, c2, b);
@@ -738,10 +791,11 @@ void renderBuffer() {
     // ── PULSO (acorde de dub) ──
     if (envViva(stabE)) {
       const float ev = envPaso(stabE, kAtStab, decStab); stabFE *= decStabF;
-      if ((n & 31) == 0) stabC = svfCoef(300.0f + 2100.0f * stabFE, 1.3f);
+      if ((n & 31) == 0) stabC = svfCoef(300.0f + 1500.0f * stabFE, 1.2f);
       float s = 0;
       for (int k = 0; k < 3; k++) { float dt = stabF[k] * INV_SR; stabPh[k] += dt; if (stabPh[k] >= 1.0f) stabPh[k] -= 1.0f; s += (2.0f * stabPh[k] - 1.0f) - polyBlep(stabPh[k], dt); }
       float l, b, h; svf(stabSvf, stabC, s * 0.33f, l, b, h);
+      stabHp += 0.0309f * (l - stabHp); l -= stabHp;                                // carril: pasa-altos ~220 Hz (el pad y el dron tienen lo de abajo)
       const float g = gC[C_PULSO] * run * gate * (1.0f - SC_CAP[C_PULSO] * duck) * NIV_CAP[C_PULSO] * ev * 0.55f;
       MEZCLA(C_PULSO, l * g, l * g);
     }
@@ -749,10 +803,11 @@ void renderBuffer() {
     // ── ARPEGIO ──
     if (envViva(arpE)) {
       const float ev = envPaso(arpE, kAtPluck, decPluck); arpFE *= decPluckF;
-      if ((n & 31) == 0) arpC = svfCoef(350.0f + 2600.0f * arpFE, 1.2f);
+      if ((n & 31) == 0) arpC = svfCoef(300.0f + 1800.0f * arpFE, 1.1f);
       float s = 0; const float f2[2] = { arpF * 1.0035f, arpF * 0.9965f };
       for (int k = 0; k < 2; k++) { float dt = f2[k] * INV_SR; arpPh[k] += dt; if (arpPh[k] >= 1.0f) arpPh[k] -= 1.0f; s += (2.0f * arpPh[k] - 1.0f) - polyBlep(arpPh[k], dt); }
       float l, b, h; svf(arpSvf, arpC, s * 0.5f, l, b, h);
+      arpHp += 0.0415f * (l - arpHp); l -= arpHp;                                   // carril: pasa-altos ~300 Hz
       const float g = gC[C_ARP] * run * gate * (1.0f - SC_CAP[C_ARP] * duck) * NIV_CAP[C_ARP] * ev * 0.5f;
       MEZCLA(C_ARP, l * g * agl, l * g * agr);
     }
@@ -775,7 +830,7 @@ void renderBuffer() {
       const float f = kickF * (1.0f + 1.8f * kickPit);                         // barrido de 2.8× a la fundamental
       kickPh += f * INV_SR; if (kickPh >= 1.0f) kickPh -= 1.0f;
       float h2 = kickPh * 2.0f; h2 -= (float)(int)h2;
-      const float body = softSat((sinT(kickPh) * kickEnv + 0.42f * sinT(h2) * kickEnv2) * 1.5f) * 0.72f;   // UNA parcial fuerte: aquí sí se satura
+      const float body = softSat((sinT(kickPh) * kickEnv + 0.42f * sinT(h2) * kickEnv2) * 1.2f) * 0.80f;   // UNA parcial fuerte: aquí sí se satura
       float l, b, h; svf(kickSvf, kickC, ruido(), l, b, h);
       const float mall = b * kickC.k * kickMall * 0.30f;                      // el mazo es RUIDO en banda, nunca un seno
       const float g = gC[C_BOMBO] * run * gate * NIV_CAP[C_BOMBO] * (body + mall);
@@ -806,6 +861,7 @@ void renderBuffer() {
         float l1, b1, h1, l2, b2, h2; svf(snF1, snC1, s, l1, b1, h1); svf(snF2, snC2, s, l2, b2, h2);
         y = (b1 * snC1.k + 0.6f * b2 * snC2.k) * snE.v * 2.2f;
       }
+      snHp += 0.0284f * (y - snHp); y -= snHp;                                  // carril: pasa-altos ~200 Hz
       const float g = gC[C_SINTE] * run * gate * (1.0f - SC_CAP[C_SINTE] * duck) * NIV_CAP[C_SINTE] * 0.5f;
       MEZCLA(C_SINTE, y * g * sgl, y * g * sgr);
     }
@@ -854,8 +910,8 @@ void renderBuffer() {
     // ── techo de agudos (13 kHz) DESPUÉS del limitador, y bloqueador de continua ──   (la saturación va ANTES del filtro maestro y de este techo)
     { float y = lpb0 * xl + lpb1 * lpx1L + lpb2 * lpx2L - lpa1 * lpy1L - lpa2 * lpy2L; lpx2L = lpx1L; lpx1L = xl; lpy2L = lpy1L; lpy1L = y; xl = y; }
     { float y = lpb0 * xr + lpb1 * lpx1R + lpb2 * lpx2R - lpa1 * lpy1R - lpa2 * lpy2R; lpx2R = lpx1R; lpx1R = xr; lpy2R = lpy1R; lpy1R = y; xr = y; }
-    { float y = xl - dcxL + 0.9985f * dcyL; dcxL = xl; dcyL = y; xl = y; }
-    { float y = xr - dcxR + 0.9985f * dcyR; dcxR = xr; dcyR = y; xr = y; }
+    { float y = xl - dcxL + 0.9958f * dcyL; dcxL = xl; dcyL = y; xl = y; }
+    { float y = xr - dcxR + 0.9958f * dcyR; dcxR = xr; dcyR = y; xr = y; }
     if (!(xl == xl)) xl = 0.0f; if (!(xr == xr)) xr = 0.0f;                    // red de seguridad contra NaN
     xl = xl > 0.98f ? 0.98f : xl < -0.98f ? -0.98f : xl; xr = xr > 0.98f ? 0.98f : xr < -0.98f ? -0.98f : xr;
     salida[n * 2] = (int16_t)(xl * 32700.0f); salida[n * 2 + 1] = (int16_t)(xr * 32700.0f);

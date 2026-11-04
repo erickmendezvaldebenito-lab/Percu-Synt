@@ -28,7 +28,7 @@ Cada Play sortea tonalidad (Re, Mi, Fa, Sol, La o Do) y modo (**eólico**, **dó
 
 | POT3 | Capa |
 |---|---|
-| 0 | **DRON** (sub + 2.º armónico + quinta + octava) |
+| 0 | **DRON** (sub + 2.º armónico y la octava en triángulo; **sin quinta fija**; el sub cede cuando entra el bombo) |
 | 0,06–0,16 | **PAD** (acorde de 4 notas, sierras desafinadas, desliza entre acordes) |
 | 0,20–0,30 | **TEXTURA** (ruido por dos resonadores afinados a la escala) |
 | 0,34–0,44 | **PULSO** (acordes de dub en el contratiempo, con mucho eco) |
@@ -56,6 +56,28 @@ Todo llega al borde del compás y desliza, nunca salta:
 - **textura**: cambia de nota.
 - **arpegio**: se reescribe de a poco.
 - **sinte**: SONAR (POT2 < 0,34, seno profundo con eco) · CAMPANA (0,34–0,67, FM de cristal) · CORO (> 0,67, voz de formantes). El timbre se decide al tocar cada nota.
+
+## Mezcla: un carril por capa, y todo mirando al mismo acorde
+
+La primera versión salió **mal** al oírla en la placa: sonidos saturados que chocaban entre sí y un bajo pegado al máximo. Las causas eran de diseño y mis pruebas no las medían (medían notas, reloj y niveles, no si las capas se pisan). Se corrigieron así:
+
+- **Cada capa tiene su octava** y un pasa-altos de carril, como en `matriz_oscura` ("nadie le pisa el grave al bombo"):
+
+| Capa | Dónde vive | Energía medida (capa sola) |
+|---|---|---|
+| dron | 20–120 Hz | 99 % entre 20 y 120 Hz |
+| bombo | 20–250 Hz | 91 % entre 20 y 120 Hz |
+| pad | 120 Hz–1 kHz | 90 % entre 120 Hz y 1 kHz |
+| pulso (acordes de dub) | 250 Hz–2 kHz, una octava sobre el pad, pasa-altos 220 Hz | 99 % entre 250 Hz y 2 kHz |
+| arpegio | 300 Hz–2 kHz, pasa-altos 300 Hz | 97 % entre 250 Hz y 2 kHz |
+| sinte | 500 Hz–4 kHz, pasa-altos 200 Hz | 96 % entre 500 Hz y 4 kHz |
+| hats | por encima de 4 kHz | 96 % |
+
+- **El bajo ya no está pegado al máximo.** El dron era un seno de sub permanente a nivel pleno; con sólo el dron sonando, el 99 % de la energía caía entre 60 y 120 Hz. Ahora es más suave, tiene octava en triángulo para que se oiga en parlantes chicos, y **cede 12 dB cuando entra el bombo**, que se queda con el grave. En la mezcla completa la energía bajo 120 Hz bajó de **~84 % a 36 %**.
+- **Las capas ya no chocan.** Antes, el arpegio, la textura y el sinte elegían notas de la escala *sin mirar qué acorde sonaba*, y el dron mantenía una quinta fija debajo de acordes que traían una sexta menor. Ahora todo se mide contra lo que ya suena (la tónica y las notas del acorde) y **ninguna capa puede caer a una 2.ª menor, 7.ª mayor o 9.ª menor** de otra: el arpegio y el sinte buscan la nota de la escala más cercana que no choque; la textura se afina a notas *del acorde*; el II del frigio no se usa como raíz (chocaría con la tónica) ni los acordes con 7.ª mayor.
+- **El pad ya no desliza entre acordes.** Un glissando de un segundo pasaba por notas que no son de ningún acorde. Ahora cada voz baja, salta y vuelve a subir.
+- **Sin saturación.** Con POT1 al máximo, todo encendido y los filtros barriendo, el pico queda en **−3,1 dBFS** y **ninguna muestra pasa de 0,75**: el limitador ya no entra nunca (antes, miles de muestras pasaban de 0,75 y algunas tocaban el techo). Pad y brillo más oscuros (corte de 450 Hz a 2,2 kHz), segunda voz del pad en triángulo en vez de una segunda sierra, envíos a delay y reverb a la mitad, y la segunda mitad del bombo con menos drive.
+- Fix de otro error mío: los escalones de la quinta y la tercera del pad estaban invertidos (con "sólo tónica y quinta" sonaba tónica y tercera).
 
 ## Pausas (BTN5)
 
@@ -102,7 +124,7 @@ Color = modo (violeta eólico · cian dórico · rojo frigio). LED0 dron · LED1
 **No está medido en la placa.** Se estimó así: se contaron las instrucciones por bloque de 128 muestras de este firmware y de tres firmwares del repo con CPU medido en la placa (`dub_capas` 52–56 %, `bruma_capas` 51–60 %, `kraftwerk_capas` 62–63 %, peor caso). Los tres dan ~3,0 ciclos por instrucción contada (±7 % entre ellos), y con ese factor:
 
 - solo el dron (POT3 = 0): **~35 %**
-- peor caso (todas las capas + sinte + filtro + delay + mutación alta): **~80 %**, con un margen de error de ±15 % que no puedo cerrar sin la placa.
+- peor caso (todas las capas + sinte + filtro + delay + mutación alta): **~83 %**, con un margen de error de ±15 % que no puedo cerrar sin la placa.
 
 Si el audio pasa del 80 % durante ~1 s, un **regulador de carga** aligera solo: nivel 1 = el pad deja de doblar sierras en raíz y quinta; nivel 2 = además calla la textura. Baja un nivel tras ~3 s por debajo del 55 %. Cada cambio llega con rampa, sin saltos.
 
@@ -114,12 +136,14 @@ Para medir la carga real, compila con `-DDIAG=1` (o pon `#define DIAG 1` arriba)
 - **Reloj sin deriva**: 781 pasos en 100 s a 117 BPM.
 - **Pausas** en el paso correcto, 11–15 dB más bajas, y sin escalones (el salto máximo entre muestras alrededor de las compuertas es igual o menor que en tramos sin pausas).
 - **Guardado**: la escena y los modos sobreviven al reinicio; el primer Play repite la guardada; los siguientes sortean otra.
-- **Nivel**: con POT1 al 80 % el pico queda en −6 dBFS; con POT1 al máximo y todo encendido, 0 muestras sobre 0,97. Sin continua y sin NaN. Agudos: 8–13 kHz queda 34 dB bajo el total y por encima de 13 kHz 46 dB bajo.
+- **Nivel**: con POT1 al máximo, todo encendido y los filtros barriendo, pico de −3,1 dBFS y RMS de −21 dBFS, **0 muestras sobre 0,75** (donde empezaría el limitador suave). Sin continua y sin NaN. La mezcla completa reparte su energía así: 20–120 Hz 36 %, 120–250 Hz 9 %, 250 Hz–1 kHz 44 %, arriba de 1 kHz 12 %.
+- **Choques entre capas**: antes, el **97 %** del tiempo sonaba al menos una 2.ª menor / 7.ª mayor entre capas distintas (3 modos × 6 tonalidades); ahora el **1 %**, y es el instante exacto de un cambio de acorde.
+- **Cambios de acorde sin escalones**: el salto máximo entre muestras alrededor de un cambio es el 75 % del de un tramo sin cambio.
 - **Regulador de carga**: sube y baja de nivel con histéresis, sin clicks.
 
 ## Lo que NO está verificado
 
-- **Cómo suena de verdad.** No lo he escuchado. Los niveles de cada capa, el timbre de cada voz y el carácter del conjunto son una primera versión de oído por ajustar con la placa.
+- **Cómo suena de verdad.** No lo he escuchado. La primera versión salió mal y esta corrige lo que se pudo **medir** (choques, bajo, saturación); si algo sigue sonando mal, es algo que no estoy midiendo y necesito que me digas qué oyes y dónde (a qué altura del POT3).
 - Que compile con el core de Arduino y la FastLED reales (se compiló con g++ y mocks, no con el IDE).
 - La carga de CPU en la placa (sólo estimada).
 - Que la escritura en flash no cause ningún bache audible (se evitó escribir en pleno Play, pero no se probó en hardware).

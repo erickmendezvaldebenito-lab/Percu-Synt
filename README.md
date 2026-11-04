@@ -179,7 +179,8 @@ Cada firmware es un sketch Arduino independiente (`.ino`). Se compila y se carga
 - **POT2 = mutación**: abajo un acorde quieto; arriba el acorde cambia cada 8, 4, 2 o 1 compases (sólo raíces con tríada consonante), el pad abre y cierra su brillo y el arpegio se reescribe. Todo llega al borde del compás y desliza.
 - BTN1 play · BTN2 filtro (POT4 = corte) · BTN3 sinte que sigue al POT2 (sonar / campana FM / coro) · BTN4 delay ping-pong en el tempo · BTN5 **pausas sincronizadas** (respira / corte / dub). Un solo reloj; cada nota es un grado del modo, así que ninguna sale de tono.
 - Cada Play sortea tonalidad, modo (eólico, dórico o frigio) y tempo; **la escena y los modos se guardan en la flash del chip** y el primer Play tras encender repite la guardada.
-- **No medido en la placa**: la carga de CPU se estimó contra `dub_capas`, `bruma_capas` y `kraftwerk_capas` (~35 % el dron solo, ~80 % el peor caso), con un regulador de carga y `-DDIAG=1` para medirla. Falta oírlo.
+- **Mezcla corregida tras la primera prueba en la placa** (saturada, capas que chocaban, bajo al máximo): cada capa vive en su octava, todas se miden contra el mismo acorde (choques entre capas del 97 % del tiempo al 1 %) y la energía bajo 120 Hz bajó de ~84 % a 36 %.
+- **No medido en la placa**: la carga de CPU se estimó contra `dub_capas`, `bruma_capas` y `kraftwerk_capas` (~34 % el dron solo, ~83 % el peor caso), con un regulador de carga y `-DDIAG=1` para medirla. Falta oírlo.
 
 #### `impact_chimes` — Campanas por golpe en el piso
 - Instrumento por **impacto**: se apoya el equipo en el piso y el **acelerómetro detecta los golpes** → dispara notas de una escala tipo campanas (eólica por defecto)
